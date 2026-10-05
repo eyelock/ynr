@@ -16,10 +16,14 @@ jobs:
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
-      # Go arrives with the walking skeleton's first slice; until then there is nothing to set up.
       - uses: actions/setup-go@v5
-        if: hashFiles('go.mod') != ''
         with:
           go-version-file: go.mod
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.14.0
+          install-only: true
       - name: make check
         run: make check
+      - name: build
+        run: make build && ./bin/ynr version

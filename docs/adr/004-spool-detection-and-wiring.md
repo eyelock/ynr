@@ -57,6 +57,11 @@ into ynf's run capture (below).
 A long-lived process that found no spool checks again once a minute, so a ynm server started
 before ynr still finds the spool once it exists.
 
+**`ynr serve`'s own settings** are flags with environment fallbacks (NFR-7): the spool root
+(`--spool`, `YNR_SPOOL_ROOT`), the collector's identity (`--collector-id`, `YNR_COLLECTOR_ID`,
+defaulting on a laptop to `local-<host>`), the job within its pool (`--collector-instance`,
+`YNR_COLLECTOR_INSTANCE`) and where to ship (`--upstream`, `YNR_UPSTREAM`).
+
 **Detection decides where to write; configuration decides what runs** (NFR-11). No tool starts
 `ynr` because it found it. On a laptop, the person runs `ynr serve`, which creates the spool on
 first start.
