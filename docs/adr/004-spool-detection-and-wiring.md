@@ -133,6 +133,12 @@ the processes it starts, so an MCP server the agent launches over stdio, such as
 the relay. It finds `YNR_SPOOL`, which ynh passes to the run, and writes to the run's folder itself,
 with `run` provenance and the spool's crash safety.
 
+**A vendor propagates the trace by its own rules.** With tracing on, Claude Code sends `traceparent`
+to its own API and to HTTP MCP servers, and has no setting to stop it. ADR-006's rule that our tools
+send trace context only within the factory binds our tools, not a vendor's; we accept this, because
+withholding `TRACEPARENT` from the vendor would break the trace from a step into the agent. The
+headers carry trace and span ids only, never content.
+
 The vendor settings in the table above are verified in the walking skeleton before anything else
 relies on them (ADR-009), including whether a repository's own Claude Code settings file can
 override the relay settings or turn prompt logging on. If it can, ynh passes its settings through
