@@ -115,14 +115,16 @@ otherwise its children inherit the environment unchanged.
 
 **The relay** is for vendor CLIs, which export only over the network. `ynr relay --spool <folder>`
 listens on a random loopback port, so parallel runs on one host never collide, writes what it
-receives into that folder, and enforces a memory limit, a request size limit and a rate limit,
-since the agent can reach it. When the relay setting is on and `ynr` is present, `ynh agent run`
+receives into that folder, and enforces a memory limit, a request size limit and a rate limit, since
+the agent can reach it. It accepts OTLP/HTTP, protobuf or JSON, optionally gzipped, and prints its
+endpoint as its first line of output (`--format json` adds its pid), which is how whoever started it
+learns where to point the vendor. When the relay setting is on and `ynr` is present, `ynh agent run`
 starts it for the length of the run, configures the vendor CLI, and stops it after the vendor exits
 and the relay has flushed:
 
 | Vendor | Configured with |
 |---|---|
-| Claude Code | `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER` and `OTEL_LOGS_EXPORTER` set to `otlp`, `OTEL_EXPORTER_OTLP_ENDPOINT` set to the relay, `TRACEPARENT`; traces are beta and reported to need `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`. Prompt logging is never turned on. |
+| Claude Code | `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER` and `OTEL_LOGS_EXPORTER` set to `otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, `OTEL_EXPORTER_OTLP_ENDPOINT` set to the relay, `TRACEPARENT`, and `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, without which it sends no spans. Verified with Claude Code 2.1.289: its `claude_code.interaction` span joins `TRACEPARENT`, and with prompt logging off a prompt's text arrives as `<REDACTED>`. Prompt logging is never turned on. |
 | Codex | an `[otel]` block in a run-local copy of its `config.toml`, with the full signal path in the endpoint, since Codex is not configured through the environment. Whether it reads `TRACEPARENT` is unverified. |
 
 **The relay's settings reach the agent's own subprocesses.** The vendor CLI passes its
