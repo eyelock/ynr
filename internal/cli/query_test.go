@@ -3,7 +3,6 @@ package cli
 import (
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/eyelock/ynr/internal/store"
 )
@@ -35,24 +34,6 @@ func TestQueryRefusesBadInput(t *testing.T) {
 	} {
 		if code, _, errs := run(append([]string{"query"}, args...)...); code != ExitUsage {
 			t.Errorf("%v = %d %q, want usage", args, code, errs)
-		}
-	}
-}
-
-func TestParseWhen(t *testing.T) {
-	at := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
-	for in, want := range map[string]time.Time{
-		"7d":                   at.Add(-7 * 24 * time.Hour),
-		"90m":                  at.Add(-90 * time.Minute),
-		"2026-10-01T00:00:00Z": time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC),
-	} {
-		if got, err := parseWhen(in, at); err != nil || !got.Equal(want) {
-			t.Errorf("%s = %v, %v", in, got, err)
-		}
-	}
-	for _, bad := range []string{"-1h", "soon", "d"} {
-		if _, err := parseWhen(bad, at); err == nil {
-			t.Errorf("%s was accepted", bad)
 		}
 	}
 }

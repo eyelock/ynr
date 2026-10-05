@@ -8,8 +8,9 @@ and the build order in [ADR-009](docs/adr/009-walking-skeleton.md).
 **Status:** the walking skeleton's first slice is done and the second has begun. `ynr serve`
 (the slim build) reads the spool and ships stamped batches to a store, by default a folder on this
 machine, and can also forward to an OTLP/HTTP endpoint such as a local Jaeger. `ynr relay` receives
-a vendor CLI's OTLP, such as Claude Code's, into a spool folder. The full build adds `ynr query`,
-the named queries over the store, with DuckDB; the hot tier, compaction and the dashboard follow.
+a vendor CLI's OTLP, such as Claude Code's, into a spool folder. The full build adds DuckDB: `ynr
+serve` keeps the last 7 days in a hot tier, and `ynr query` asks it, or reads the store directly
+when no server is running. Compaction and the dashboard follow.
 
 ## Install
 

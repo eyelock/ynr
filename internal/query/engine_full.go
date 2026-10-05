@@ -16,8 +16,11 @@ import (
 	"github.com/eyelock/ynr/internal/store"
 )
 
-//go:embed views.sql
-var views string
+//go:embed macros.sql
+var macros string
+
+//go:embed batches.sql
+var batchViews string
 
 // The OTLP JSON shapes DuckDB reads each signal's lines as. Only the fields the views use are
 // named; read_json ignores the rest. Numbers that OTLP JSON may write as strings are JSON, and
@@ -81,18 +84,18 @@ func promotedSQL() string {
 	return strings.Join(cols, ",\n       ")
 }
 
-// Run runs a named query over the store's batches received in the hours its window can touch.
+// Run runs a named query over the store's batches received in the hours its window can touch,
+// reading them directly: what ynr query does when no ynr serve is answering.
 func Run(ctx context.Context, r store.Reader, q *Query, p Params) (*Result, error) {
 	if err := q.Check(p); err != nil {
 		return nil, err
 	}
-	setup := strings.ReplaceAll(views, "@promoted@", promotedSQL())
-	for _, s := range signals {
-		files, err := batches(ctx, r, q, s.name, p)
-		if err != nil {
+	files := map[string][]string{}
+	for _, s := range q.Signals {
+		var err error
+		if files[s], err = batches(ctx, r, s, Hours(p.Since, p.Until)); err != nil {
 			return nil, err
 		}
-		setup = strings.ReplaceAll(setup, "@"+s.name+"@", relation(s.column, s.typ, files))
 	}
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
@@ -101,9 +104,27 @@ func Run(ctx context.Context, r store.Reader, q *Query, p Params) (*Result, erro
 	defer func() { _ = db.Close() }()
 	// One connection, so the macros and views exist for the query that follows.
 	db.SetMaxOpenConns(1)
+	setup := macros + batchSQL(files) + `
+CREATE VIEW spans AS FROM batch_spans;
+CREATE VIEW logs AS FROM batch_logs;
+CREATE VIEW metric_points AS FROM batch_metric_points;`
 	if _, err := db.ExecContext(ctx, setup); err != nil {
 		return nil, fmt.Errorf("query: preparing the views: %w", err)
 	}
+	return runOn(ctx, db, q, p)
+}
+
+// batchSQL points the batch views at the given files of each signal.
+func batchSQL(files map[string][]string) string {
+	s := strings.ReplaceAll(batchViews, "@promoted@", promotedSQL())
+	for _, sig := range signals {
+		s = strings.ReplaceAll(s, "@"+sig.name+"@", relation(sig.column, sig.typ, files[sig.name]))
+	}
+	return s
+}
+
+// runOn runs a named query on a database that has spans, logs and metric_points.
+func runOn(ctx context.Context, db *sql.DB, q *Query, p Params) (*Result, error) {
 	rows, err := db.QueryContext(ctx, q.SQL,
 		sql.Named("since", p.Since.UTC()), sql.Named("until", p.Until.UTC()),
 		sql.Named("arg", p.Arg), sql.Named("lane", p.Lane))
@@ -132,18 +153,10 @@ func Run(ctx context.Context, r store.Reader, q *Query, p Params) (*Result, erro
 	return res, rows.Err()
 }
 
-// batches lists the signal's batch files in the hours the window can touch, or none when the
-// query does not read the signal.
-func batches(ctx context.Context, r store.Reader, q *Query, signal string, p Params) ([]string, error) {
-	var reads bool
-	for _, s := range q.Signals {
-		reads = reads || s == signal
-	}
-	if !reads {
-		return nil, nil
-	}
+// batches lists a signal's batch files received in the given hours.
+func batches(ctx context.Context, r store.Reader, signal string, hours []time.Time) ([]string, error) {
 	var files []string
-	for _, h := range Hours(p.Since, p.Until) {
+	for _, h := range hours {
 		keys, err := r.List(ctx, HourPrefix(signal, h))
 		if err != nil {
 			return nil, err

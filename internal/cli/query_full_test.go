@@ -7,6 +7,8 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -69,5 +71,54 @@ func TestQueryReadsTheStore(t *testing.T) {
 	code, out, _ = run("query", "trace", "5B8EFFF798038103D269B633813FC60C", "--store", store.FolderURL(dir))
 	if code != ExitOK || !strings.Contains(out, "ynh.run") || strings.Contains(out, "depth") {
 		t.Fatalf("trace = %d\n%s", code, out)
+	}
+}
+
+// TestQueryAsksTheRunningServer: with ynr serve running, ynr query is answered by its hot tier.
+// No store is configured for ynr query itself, so a direct read would fail.
+func TestQueryAsksTheRunningServer(t *testing.T) {
+	root, err := os.MkdirTemp("", "ynr") // short: the socket lives under it
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(root) }()
+	dir := t.TempDir()
+	s, err := store.Open(store.FolderURL(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, _ = zw.Write([]byte(strings.ReplaceAll(runLine, `"1791235800000000000"`, `"`+strconv.FormatInt(at.Add(-time.Minute).UnixNano(), 10)+`"`) + "\n"))
+	_ = zw.Close()
+	if err := s.Put(context.Background(), store.BatchKey(store.Traces, at, "laptop", store.NewULID(at), "local.a", 0, 1), buf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() {
+		var out, errb bytes.Buffer
+		done <- Run(ctx, []string{"serve", "--spool", root, "--store", store.FolderURL(dir), "--poll", "50ms"}, &out, &errb)
+	}()
+	t.Setenv("YNR_STORE", "")
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		code, out, errs := run("query", "cost", "--spool", root)
+		if code == ExitOK && strings.Contains(out, "claude-opus-5-5") {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("query = %d %q %q", code, out, errs)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if code, _, errs := run("query", "item", "--spool", root); code != ExitUsage {
+		t.Errorf("a bad request = %d %q", code, errs)
+	}
+	cancel()
+	if code := <-done; code != ExitOK {
+		t.Fatalf("serve = %d", code)
 	}
 }

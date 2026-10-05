@@ -1,51 +1,14 @@
--- The views every named query reads (ADR-005): spans, logs and metric_points, flattened from the
--- OTLP JSON export requests in the store's batches. @traces@, @logs@ and @metrics@ are replaced
--- with a read of that signal's batch files, or an empty relation of the same shape.
+-- The batch views (ADR-005): batch_spans, batch_logs and batch_metric_points, flattened from the
+-- OTLP JSON export requests in a set of the store's batches. @traces@, @logs@ and @metrics@ are
+-- replaced with a read of that signal's batch files, or an empty relation of the same shape.
+-- The named queries read spans, logs and metric_points: views over these when reading the store
+-- directly, and the hot tier's tables in a running ynr serve.
 --
 -- Shipping is at least once, so the same lines can be in two batches. Each view keeps one copy
--- of a record: spans by trace id and span id, log records and metric points by a hash of their
--- content with their resource.
+-- of a record, by its record_id: a span's trace id and span id, and a hash of a log record's or
+-- metric point's content with its resource.
 
--- An attribute value as text: strings as they are, numbers and booleans as written, arrays and
--- maps as JSON.
-CREATE MACRO otel_str(v) AS coalesce(
-  v->>'stringValue', v->>'intValue', v->>'boolValue', v->>'doubleValue', v->>'bytesValue',
-  (v->'arrayValue')::VARCHAR, (v->'kvlistValue')::VARCHAR);
-
--- Attributes as a list of (k, v), not a map: a map refuses duplicate or null keys, and one bad
--- record must not fail every query.
-CREATE MACRO otel_attrs(l) AS
-  coalesce(list_transform(l, a -> struct_pack(k := a.key, v := otel_str(a.value))), []);
-
--- One attribute's value, or NULL.
-CREATE MACRO attr(l, key) AS list_filter(l, a -> a.k = key)[1].v;
-
--- An attribute from the resource, where ynr stamps what a run's manifest says, else the record.
-CREATE MACRO pick(res, att, key) AS coalesce(attr(res, key), attr(att, key));
-
--- OTLP JSON writes 64-bit integers as strings and enums as numbers, and readers accept either.
-CREATE MACRO otel_text(j) AS trim(j::VARCHAR, '"');
-CREATE MACRO otel_num(j) AS TRY_CAST(otel_text(j) AS DOUBLE);
-CREATE MACRO otel_ns(j) AS TRY_CAST(otel_text(j) AS HUGEINT);
-CREATE MACRO otel_time(j) AS
-  CASE WHEN otel_ns(j) > 0 THEN make_timestamp(CAST(otel_ns(j) // 1000 AS BIGINT)) END;
-CREATE MACRO otel_kind(j) AS CASE otel_text(j)
-  WHEN '1' THEN 'internal' WHEN 'SPAN_KIND_INTERNAL' THEN 'internal'
-  WHEN '2' THEN 'server' WHEN 'SPAN_KIND_SERVER' THEN 'server'
-  WHEN '3' THEN 'client' WHEN 'SPAN_KIND_CLIENT' THEN 'client'
-  WHEN '4' THEN 'producer' WHEN 'SPAN_KIND_PRODUCER' THEN 'producer'
-  WHEN '5' THEN 'consumer' WHEN 'SPAN_KIND_CONSUMER' THEN 'consumer'
-  ELSE 'unspecified' END;
-CREATE MACRO otel_status(j) AS CASE otel_text(j)
-  WHEN '1' THEN 'ok' WHEN 'STATUS_CODE_OK' THEN 'ok'
-  WHEN '2' THEN 'error' WHEN 'STATUS_CODE_ERROR' THEN 'error'
-  ELSE 'unset' END;
-CREATE MACRO otel_temporality(j) AS CASE otel_text(j)
-  WHEN '1' THEN 'delta' WHEN 'AGGREGATION_TEMPORALITY_DELTA' THEN 'delta'
-  WHEN '2' THEN 'cumulative' WHEN 'AGGREGATION_TEMPORALITY_CUMULATIVE' THEN 'cumulative'
-  END;
-
-CREATE VIEW spans AS
+CREATE OR REPLACE VIEW batch_spans AS
 WITH r AS (
   SELECT filename AS file, unnest(resourceSpans) AS rs FROM @traces@
 ), s AS (
@@ -57,7 +20,8 @@ WITH r AS (
          lower(sp.traceId) AS trace_id, lower(sp.spanId) AS span_id
   FROM x
 )
-SELECT otel_time(sp.startTimeUnixNano) AS time, otel_time(sp.endTimeUnixNano) AS end_time,
+SELECT trace_id || '/' || span_id AS record_id,
+       otel_time(sp.startTimeUnixNano) AS time, otel_time(sp.endTimeUnixNano) AS end_time,
        CAST(otel_ns(sp.endTimeUnixNano) - otel_ns(sp.startTimeUnixNano) AS DOUBLE) / 1e6 AS duration_ms,
        trace_id, span_id, nullif(lower(sp.parentSpanId), '') AS parent_span_id,
        sp.name AS name, otel_kind(sp.kind) AS kind, otel_status(sp.status.code) AS status,
@@ -66,9 +30,9 @@ SELECT otel_time(sp.startTimeUnixNano) AS time, otel_time(sp.endTimeUnixNano) AS
        TRY_CAST(attr(attributes, 'ynh.run.cost_usd') AS DOUBLE) AS cost_usd,
        scope, resource, attributes, file
 FROM y
-QUALIFY row_number() OVER (PARTITION BY trace_id, span_id ORDER BY file) = 1;
+QUALIFY row_number() OVER (PARTITION BY record_id ORDER BY file) = 1;
 
-CREATE VIEW logs AS
+CREATE OR REPLACE VIEW batch_logs AS
 WITH r AS (
   SELECT filename AS file, unnest(resourceLogs) AS rl FROM @logs@
 ), s AS (
@@ -82,7 +46,8 @@ WITH r AS (
          md5(raw_resource::VARCHAR || lr::VARCHAR) AS record_hash
   FROM x
 )
-SELECT coalesce(otel_time(lr.timeUnixNano), otel_time(lr.observedTimeUnixNano)) AS time,
+SELECT record_hash AS record_id,
+       coalesce(otel_time(lr.timeUnixNano), otel_time(lr.observedTimeUnixNano)) AS time,
        coalesce(nullif(lr.eventName, ''), attr(attributes, 'event.name')) AS event,
        lr.severityText AS severity, TRY_CAST(otel_text(lr.severityNumber) AS INTEGER) AS severity_number,
        coalesce(lr.body->>'stringValue', lr.body::VARCHAR) AS body,
@@ -90,9 +55,9 @@ SELECT coalesce(otel_time(lr.timeUnixNano), otel_time(lr.observedTimeUnixNano)) 
        @promoted@,
        scope, resource, attributes, file
 FROM y
-QUALIFY row_number() OVER (PARTITION BY record_hash ORDER BY file) = 1;
+QUALIFY row_number() OVER (PARTITION BY record_id ORDER BY file) = 1;
 
-CREATE VIEW metric_points AS
+CREATE OR REPLACE VIEW batch_metric_points AS
 WITH r AS (
   SELECT filename AS file, unnest(resourceMetrics) AS rm FROM @metrics@
 ), s AS (
@@ -132,9 +97,10 @@ WITH r AS (
          otel_attrs(dp.attributes), md5(raw_resource::VARCHAR || name || dp::VARCHAR)
   FROM h
 )
-SELECT otel_time(time_ns) AS time, otel_time(start_ns) AS start_time, name, unit, type,
+SELECT record_hash AS record_id,
+       otel_time(time_ns) AS time, otel_time(start_ns) AS start_time, name, unit, type,
        temporality, monotonic, value, count,
        @promoted@,
        scope, resource, attributes, file
 FROM y
-QUALIFY row_number() OVER (PARTITION BY record_hash ORDER BY file) = 1;
+QUALIFY row_number() OVER (PARTITION BY record_id ORDER BY file) = 1;
