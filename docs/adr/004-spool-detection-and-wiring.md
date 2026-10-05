@@ -118,20 +118,20 @@ listens on a random loopback port, so parallel runs on one host never collide, w
 receives into that folder, and enforces a memory limit, a request size limit and a rate limit, since
 the agent can reach it. It accepts OTLP/HTTP, protobuf or JSON, optionally gzipped, and prints its
 endpoint as its first line of output (`--format json` adds its pid), which is how whoever started it
-learns where to point the vendor. When the relay setting is on and `ynr` is present, `ynh agent run`
-starts it for the length of the run, configures the vendor CLI, and stops it after the vendor exits
-and the relay has flushed:
+learns where to point the vendor. With `--exit-on-stdin-eof` it also stops when its standard input
+closes, so it ends with the process that started it even if that process is killed outright. When
+the relay setting is on and `ynr` is present, `ynh agent run` starts it for the length of the run,
+configures the vendor CLI, and stops it after the vendor exits and the relay has flushed:
 
 | Vendor | Configured with |
 |---|---|
 | Claude Code | `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER` and `OTEL_LOGS_EXPORTER` set to `otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, `OTEL_EXPORTER_OTLP_ENDPOINT` set to the relay, `TRACEPARENT`, and `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, without which it sends no spans. Verified with Claude Code 2.1.289: its `claude_code.interaction` span joins `TRACEPARENT`, and with prompt logging off a prompt's text arrives as `<REDACTED>`. Prompt logging is never turned on. |
 | Codex | an `[otel]` block in a run-local copy of its `config.toml`, with the full signal path in the endpoint, since Codex is not configured through the environment. Whether it reads `TRACEPARENT` is unverified. |
 
-**The relay's settings reach the agent's own subprocesses.** The vendor CLI passes its
-environment on, so anything the agent starts that follows the order above, such as ynm launched
-as an MCP server over stdio, sees `OTEL_EXPORTER_OTLP_ENDPOINT` and exports to the relay instead
-of writing to the spool. That is expected: its records still land in the run's folder with `run`
-provenance, but without the spool's crash safety.
+**The relay's settings stay with the vendor.** Claude Code does not pass its `OTEL_*` settings to
+the processes it starts, so an MCP server the agent launches over stdio, such as ynm, does not see
+the relay. It finds `YNR_SPOOL`, which ynh passes to the run, and writes to the run's folder itself,
+with `run` provenance and the spool's crash safety.
 
 The vendor settings in the table above are verified in the walking skeleton before anything else
 relies on them (ADR-009), including whether a repository's own Claude Code settings file can

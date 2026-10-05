@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/eyelock/ynr/internal/spool"
 )
@@ -152,5 +153,34 @@ func TestRelayPrintsItsEndpointThenWrites(t *testing.T) {
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), ".jsonl") || strings.HasSuffix(entries[0].Name(), ".open.jsonl") {
 		t.Fatalf("files = %v", entries)
+	}
+}
+
+// TestRelayStopsWhenStdinCloses: with --exit-on-stdin-eof the relay ends with whoever started it,
+// even one killed outright, since its end of the pipe closes.
+func TestRelayStopsWhenStdinCloses(t *testing.T) {
+	in, closeIn := io.Pipe()
+	old := stdin
+	stdin = in
+	t.Cleanup(func() { stdin = old })
+	out, outW := io.Pipe()
+	var errb bytes.Buffer
+	code := make(chan int, 1)
+	go func() {
+		code <- Run(context.Background(), []string{"relay", "--spool", t.TempDir(), "--exit-on-stdin-eof"}, outW, &errb)
+		_ = outW.Close()
+	}()
+	if _, err := bufio.NewReader(out).ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, _ = io.Copy(io.Discard, out) }()
+	_ = closeIn.Close()
+	select {
+	case c := <-code:
+		if c != ExitOK {
+			t.Fatalf("exit %d: %s", c, errb.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the relay kept running after stdin closed")
 	}
 }
