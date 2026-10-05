@@ -63,7 +63,10 @@ before ynr still finds the spool once it exists.
 **`ynr serve`'s own settings** are flags with environment fallbacks (NFR-7): the spool root
 (`--spool`, `YNR_SPOOL_ROOT`), the collector's identity (`--collector-id`, `YNR_COLLECTOR_ID`,
 defaulting on a laptop to `local-<host>`), the job within its pool (`--collector-instance`,
-`YNR_COLLECTOR_INSTANCE`) and where to ship (`--upstream`, `YNR_UPSTREAM`).
+`YNR_COLLECTOR_INSTANCE`) the object store it ships to (`--store`, `YNR_STORE`, defaulting on a
+laptop to the folder `$XDG_DATA_HOME/ynr/store`), and an optional OTLP endpoint it also forwards to
+(`--upstream`, `YNR_UPSTREAM`). With a store, the store is what commits the spool, and the upstream
+is a best-effort copy that never holds the spool back; without one, the upstream commits it.
 
 **Detection decides where to write; configuration decides what runs** (NFR-11). No tool starts
 `ynr` because it found it. On a laptop, the person runs `ynr serve`, which creates the spool on

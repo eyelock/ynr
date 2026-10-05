@@ -5,10 +5,11 @@ OpenTelemetry. Tools write telemetry into a crash-safe file spool; `ynr serve` r
 where each record came from, and ships it on. The design is in [the ADRs](docs/adr/README.md),
 and the build order in [ADR-009](docs/adr/009-walking-skeleton.md).
 
-**Status:** the walking skeleton's first slice is in progress. `ynr serve` (the slim build) reads
-the spool and ships to an OTLP/HTTP endpoint, such as a local Jaeger; the object store, dashboards
-and the full build follow in later slices. `ynr relay` receives a vendor CLI's OTLP, such as
-Claude Code's, and writes it into a spool folder.
+**Status:** the walking skeleton's first slice is done and the second has begun. `ynr serve`
+(the slim build) reads the spool and ships stamped batches to a store, by default a folder on this
+machine, and can also forward to an OTLP/HTTP endpoint such as a local Jaeger. `ynr relay` receives
+a vendor CLI's OTLP, such as Claude Code's, into a spool folder. The full build, with queries and
+the dashboard, follows.
 
 ## Install
 
@@ -22,7 +23,7 @@ brew install eyelock/tap/ynr
 ```bash
 make build
 docker run --rm -d --name jaeger -p 16686:16686 -p 4318:4318 jaegertracing/jaeger:latest
-./bin/ynr serve --upstream http://localhost:4318      # foreground; Ctrl-C to stop
+./bin/ynr serve --upstream http://localhost:4318      # foreground; Ctrl-C to stop; also stores batches
 ./bin/ynr info                                        # in another terminal
 ```
 

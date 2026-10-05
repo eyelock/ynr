@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/collector/confmap/provider/yamlprovider"
 	"go.opentelemetry.io/collector/exporter"
 	"go.opentelemetry.io/collector/exporter/debugexporter"
+	"go.opentelemetry.io/collector/exporter/nopexporter"
 	"go.opentelemetry.io/collector/exporter/otlphttpexporter"
 	"go.opentelemetry.io/collector/otelcol"
 	"go.opentelemetry.io/collector/receiver"
@@ -30,6 +31,12 @@ type Settings struct {
 	PollInterval time.Duration
 	MaxLine      int
 	Identity     stamp.Identity
+	// Store is the object store's URL, such as file:///home/me/.local/share/ynr/store. With a
+	// store, it is what commits the spool, and the upstream is a best-effort copy (ADR-005).
+	Store string
+	// ShipAge and ShipBytes say how often each spool file's new lines are shipped to the store.
+	ShipAge   time.Duration
+	ShipBytes int64
 	// Upstream is an OTLP/HTTP endpoint, such as http://localhost:4318.
 	Upstream string
 	// Debug also prints a summary of everything shipped to stderr.
@@ -42,7 +49,7 @@ func Factories() (otelcol.Factories, error) {
 	if err != nil {
 		return otelcol.Factories{}, err
 	}
-	exporters, err := otelcol.MakeFactoryMap[exporter.Factory](otlphttpexporter.NewFactory(), debugexporter.NewFactory())
+	exporters, err := otelcol.MakeFactoryMap[exporter.Factory](otlphttpexporter.NewFactory(), debugexporter.NewFactory(), nopexporter.NewFactory())
 	if err != nil {
 		return otelcol.Factories{}, err
 	}
@@ -55,21 +62,34 @@ func Factories() (otelcol.Factories, error) {
 
 // Config builds the Collector's configuration. It is JSON, which is also YAML.
 func Config(s Settings) (string, error) {
-	if s.Upstream == "" {
-		return "", errors.New("an upstream OTLP endpoint is required until the object store arrives (ADR-009, slice 2)")
+	if s.Upstream == "" && s.Store == "" {
+		return "", errors.New("nowhere to ship: set a store, an upstream OTLP endpoint, or both")
 	}
-	exporters := []string{"otlp_http"}
-	exp := map[string]any{
-		"otlp_http": map[string]any{
+	exporters := []string{}
+	exp := map[string]any{}
+	if s.Upstream != "" {
+		exporters = append(exporters, "otlp_http")
+		retry := map[string]any{"enabled": true, "max_elapsed_time": "30s"}
+		if s.Store != "" {
+			// A best-effort copy: a short retry, so a slow upstream delays shipping little.
+			retry = map[string]any{"enabled": true, "max_elapsed_time": "5s"}
+		}
+		exp["otlp_http"] = map[string]any{
 			"endpoint": s.Upstream,
-			// Synchronous: a line is committed only once the upstream has accepted it (ADR-004).
+			// Synchronous: without a store, a line is committed only once the upstream has
+			// accepted it (ADR-004).
 			"sending_queue":    map[string]any{"enabled": false},
-			"retry_on_failure": map[string]any{"enabled": true, "max_elapsed_time": "30s"},
-		},
+			"retry_on_failure": retry,
+		}
 	}
 	if s.Debug {
 		exporters = append(exporters, "debug")
 		exp["debug"] = map[string]any{"verbosity": "basic"}
+	}
+	if len(exporters) == 0 {
+		// The store is written by the receiver itself; a pipeline still needs an exporter.
+		exporters = append(exporters, "nop")
+		exp["nop"] = map[string]any{}
 	}
 	pipe := map[string]any{"receivers": []string{spoolreceiver.Type.String()}, "exporters": exporters}
 	cfg := map[string]any{
@@ -80,6 +100,9 @@ func Config(s Settings) (string, error) {
 				"max_line":           s.MaxLine,
 				"collector_id":       s.Identity.ID,
 				"collector_instance": s.Identity.Instance,
+				"store":              s.Store,
+				"ship_age":           shipAge(s).String(),
+				"ship_bytes":         shipBytes(s),
 			},
 		},
 		"exporters": exp,
@@ -116,4 +139,18 @@ func Run(ctx context.Context, s Settings) error {
 	stop := context.AfterFunc(ctx, col.Shutdown)
 	defer stop()
 	return col.Run(ctx)
+}
+
+func shipAge(s Settings) time.Duration {
+	if s.ShipAge > 0 {
+		return s.ShipAge
+	}
+	return 15 * time.Second
+}
+
+func shipBytes(s Settings) int64 {
+	if s.ShipBytes > 0 {
+		return s.ShipBytes
+	}
+	return 16 << 20
 }

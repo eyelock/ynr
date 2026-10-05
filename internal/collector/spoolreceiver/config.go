@@ -25,10 +25,18 @@ type Config struct {
 	CollectorID string `mapstructure:"collector_id"`
 	// CollectorInstance is the job within the pool, recorded as data.
 	CollectorInstance string `mapstructure:"collector_instance"`
+	// Store is the object store's URL (ADR-005). When set, the receiver ships each spool file's
+	// stamped lines there as compressed batches and commits a file's position only once its batch
+	// is stored; the pipeline after it becomes a best-effort copy.
+	Store string `mapstructure:"store"`
+	// ShipAge and ShipBytes say how often a file's new lines are shipped: once they are this old
+	// or this large, whichever comes first.
+	ShipAge   time.Duration `mapstructure:"ship_age"`
+	ShipBytes int64         `mapstructure:"ship_bytes"`
 }
 
 func createDefaultConfig() component.Config {
-	return &Config{PollInterval: time.Second}
+	return &Config{PollInterval: time.Second, ShipAge: 15 * time.Second, ShipBytes: 16 << 20}
 }
 
 // Validate checks the configuration.

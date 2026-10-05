@@ -20,8 +20,9 @@ tools ──► spool ──► ynr serve ──────► object store ─
                      (slim or full)    then Parquet         item index, fleet UI
 ```
 
-On a laptop, the full build's `ynr serve` plays both parts: it ships to a local folder, and keeps
-the hot tier, compaction and the local dashboard over it.
+On a laptop, the full build's `ynr serve` plays both parts: it ships to a local folder
+(`$XDG_DATA_HOME/ynr/store`, default), and keeps the hot tier, compaction and the local dashboard
+over it.
 
 **Three ports, each with a laptop adapter and a first cloud adapter:**
 
