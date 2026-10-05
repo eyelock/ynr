@@ -35,8 +35,9 @@ It is the only contract between a tool and ynr.
   file exporter, and writing the spool correctly is subtle, so it is written once, beside the
   receiver that reads it: a Go module (`github.com/eyelock/ynr/spoolexporter`, released with tags
   `spoolexporter/v*`) and an npm package (`@eyelock/otel-spool-exporter`), both in the
-  `spoolexporter/` folder of ynr's repository. Each has its own module and depends on nothing
-  else in ynr; they are ordinary OpenTelemetry exporters that know nothing of ynr's roles. The
+  `spoolexporter/` folder of ynr's repository. Each has its own module, depends only on its
+  language's OpenTelemetry SDK, with no network exporter or gRPC, and nothing else in ynr; they
+  are ordinary OpenTelemetry exporters that know nothing of ynr's roles. The
   spool format and both ends of it live in one repository, and every tool uses them (NFR-8).
 
 **Reading.** `ynr serve` reads every writer folder with ynr's own spool receiver, including open
