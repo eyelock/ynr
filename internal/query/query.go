@@ -27,7 +27,9 @@ type Query struct {
 	Since time.Duration
 	// Signals are the signals the query reads; the others are not opened.
 	Signals []string
-	// SQL is DuckDB SQL over the views spans, logs and metric_points (views.sql), with the
+	// Indexed queries read only the hours the item index names for the item in Arg.
+	Indexed bool
+	// SQL is DuckDB SQL over spans, logs and metric_points (batches.sql), with the
 	// named parameters $since and $until (timestamps), $arg and $lane (text).
 	SQL string
 }
@@ -44,6 +46,8 @@ type Params struct {
 type Result struct {
 	Columns []string
 	Rows    [][]any
+	// Files is how many parts and batches a direct read opened, for tests and debugging.
+	Files int
 }
 
 // Hours are the hours whose batches can hold records from since to until: a record is never
@@ -116,6 +120,7 @@ ORDER BY lane, runs DESC, outcome`,
 		Name:    "item",
 		Help:    "what happened to one work item, by its key: its steps, runs and events in order",
 		Arg:     "<item key>",
+		Indexed: true,
 		Since:   7 * 24 * time.Hour,
 		Signals: []string{store.Traces, store.Logs},
 		SQL: `

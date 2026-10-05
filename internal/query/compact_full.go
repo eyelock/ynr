@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/eyelock/ynr/internal/store"
@@ -23,6 +24,7 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 	now = now.UTC()
 	last := now.Add(-time.Hour - c.Grace).Truncate(time.Hour) // the last hour closed for long enough
 	var errs []error
+	days := map[time.Time]bool{} // days whose item index must be rewritten
 	for _, sig := range signals {
 		for t := now.Add(-c.Lookback).Truncate(time.Hour); !t.After(last); t = t.Add(time.Hour) {
 			h, err := ReadHour(ctx, r, sig.name, t)
@@ -36,6 +38,9 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 					continue
 				}
 				compacted++
+				if slices.Contains(indexed, sig.name) {
+					days[t.Truncate(24*time.Hour)] = true
+				}
 				if h, err = ReadHour(ctx, r, sig.name, t); err != nil {
 					errs = append(errs, err)
 					continue
@@ -44,7 +49,39 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 			errs = append(errs, prune(ctx, r, h, c.Keep, now))
 		}
 	}
+	// A day with compacted hours but no index, after a crash between the two, is indexed too.
+	for t := now.Add(-c.Lookback).Truncate(24 * time.Hour); !t.After(last); t = t.Add(24 * time.Hour) {
+		if !days[t] {
+			missing, err := indexMissing(ctx, r, t)
+			errs = append(errs, err)
+			days[t] = missing
+		}
+	}
+	for day, rebuild := range days {
+		if rebuild {
+			errs = append(errs, buildIndex(ctx, r, day))
+		}
+	}
 	return compacted, errors.Join(errs...)
+}
+
+// indexMissing reports whether a day has compacted hours but no item index.
+func indexMissing(ctx context.Context, r store.Reader, day time.Time) (bool, error) {
+	key := store.IndexKey(day)
+	keys, err := r.List(ctx, key[:strings.LastIndexByte(key, '/')+1])
+	if err != nil || slices.Contains(keys, key) {
+		return false, err
+	}
+	for _, sig := range indexed {
+		ks, err := r.List(ctx, "compacted/"+sig+"/"+day.Format("2006/01/02")+"/")
+		if err != nil {
+			return false, err
+		}
+		if len(ks) > 0 {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func compactHour(ctx context.Context, r store.Reader, sig signal, hour time.Time, h *Hour, now time.Time) error {
