@@ -21,6 +21,10 @@ type identity struct {
 
 func (id identity) String() string { return fmt.Sprintf("%d:%d", id.Dev, id.Ino) }
 
+// devNum widens a device number, whose type differs by platform (int32 on macOS, uint64 on
+// Linux), without a conversion that is redundant on one of them.
+func devNum[T ~int32 | ~uint32 | ~int64 | ~uint64](d T) uint64 { return uint64(d) }
+
 func statOf(fi os.FileInfo) (*syscall.Stat_t, bool) {
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	return st, ok
@@ -56,12 +60,12 @@ func openSafe(path string, dirOwner uint32, rootDev uint64) (*os.File, identity,
 		return reject("is not a regular file")
 	case st.Nlink != 1:
 		return reject("has more than one link")
-	case uint64(st.Dev) != rootDev:
+	case devNum(st.Dev) != rootDev:
 		return reject("is on another device")
 	case st.Uid != dirOwner:
 		return reject("is not owned by its folder's owner")
 	}
-	return f, identity{Dev: uint64(st.Dev), Ino: st.Ino}, fi.Size(), nil
+	return f, identity{Dev: devNum(st.Dev), Ino: st.Ino}, fi.Size(), nil
 }
 
 // dirOwnerAndDev returns a directory's owner and device, refusing a symbolic link.
@@ -77,5 +81,5 @@ func dirOwnerAndDev(path string) (uint32, uint64, error) {
 	if !ok {
 		return 0, 0, fmt.Errorf("%w: %s has no unix file status", ErrRejected, path)
 	}
-	return st.Uid, uint64(st.Dev), nil
+	return st.Uid, devNum(st.Dev), nil
 }
