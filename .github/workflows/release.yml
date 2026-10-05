@@ -61,5 +61,7 @@ jobs:
           args: release --clean
         env:
           GORELEASER_CURRENT_TAG: ${{ github.ref_name }}
-          # Writes the release here and the formula to eyelock/homebrew-tap.
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # The release here is written with this workflow's own token (contents: write).
+          GITHUB_TOKEN: ${{ github.token }}
+          # RELEASE_TOKEN can write only eyelock/homebrew-tap, for the formula.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.RELEASE_TOKEN }}
