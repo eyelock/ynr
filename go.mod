@@ -3,7 +3,7 @@ module github.com/eyelock/ynr
 go 1.26.0
 
 require (
-	github.com/eyelock/ynr/spoolexporter v0.0.0
+	github.com/eyelock/ynr/spoolexporter v0.1.0
 	go.opentelemetry.io/collector/component v1.68.0
 	go.opentelemetry.io/collector/component/componenttest v0.162.0
 	go.opentelemetry.io/collector/confmap v1.68.0
@@ -177,7 +177,3 @@ require (
 	sigs.k8s.io/structured-merge-diff/v6 v6.4.2 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
-
-// The spool exporter is its own module in this repository; ynr uses it only in tests, to prove
-// the receiver reads what it writes.
-replace github.com/eyelock/ynr/spoolexporter => ./spoolexporter
