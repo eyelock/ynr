@@ -18,7 +18,7 @@ tool.
 **Every participating tool:**
 
 1. **Sets up once, at process start,** with its language's official OpenTelemetry SDK and the
-   public spool exporter package for its language (ADR-004), choosing where to write in ADR-004's
+   spool exporter package for its language (ADR-004), choosing where to write in ADR-004's
    order: the operator's `OTEL_EXPORTER_OTLP_*`, then the spool, then the no-op providers.
 2. **Describes itself** with `service.name`, `service.version` and `service.instance.id`, and
    honours the standard `OTEL_RESOURCE_ATTRIBUTES`.

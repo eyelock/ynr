@@ -25,8 +25,8 @@ consolidate lifecycle as the ADRs.
 ## Functional requirements
 
 ### Collection
-- FR-1 Tools write telemetry as OpenTelemetry JSON lines into a spool folder, using shared public
-  spool exporter packages; ynr reads the spool.
+- FR-1 Tools write telemetry as OpenTelemetry JSON lines into a spool folder, using shared spool
+  exporter packages; ynr reads the spool.
 - FR-2 Relay a vendor CLI's network telemetry (Claude Code, Codex) into the spool.
 - FR-3 Ship what it reads to an object store as compressed batches, compacted into Parquet by the
   reader of the store, and optionally forward it over OTLP to an operator's own backend.
@@ -66,9 +66,10 @@ consolidate lifecycle as the ADRs.
   Redaction happens at the source, with the collector as a second line.
 - NFR-7 Conventions mirror the siblings: stable `--format json`, meaningful exit codes, every
   environment variable a fallback for an explicit flag.
-- NFR-8 No sibling has a build or runtime dependency on ynr's code. Siblings depend on the public
-  spool exporter packages, which are generic OpenTelemetry exporters, and their CI installs a
-  pinned `ynr` release for the conformance check (ADR-008).
+- NFR-8 No sibling has a build or runtime dependency on ynr's code. Siblings depend only on the
+  spool exporter packages, which are generic OpenTelemetry exporters released from ynr's
+  repository as their own Go module and npm package, depending on nothing else in it; their CI
+  installs a pinned `ynr` release for the conformance check (ADR-008).
 - NFR-9 Written in Go, as a distribution of the OpenTelemetry Collector, released as two builds
   from one source: a full build with DuckDB, and a slim build without cgo for images.
 - NFR-10 Works fully on a laptop, offline, with nothing extra to run. The cloud is the same design

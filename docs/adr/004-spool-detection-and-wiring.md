@@ -31,11 +31,13 @@ It is the only contract between a tool and ynr.
   job). If the object store is unreachable for long enough to reach the cap, it evicts the oldest
   closed files first, counting what it drops (`ynr.spool.evicted`), so an outage can never grow
   the spool without limit.
-- **The spool exporter is shared, public and generic.** The Go and JavaScript SDKs do not ship an
-  OTLP file exporter, and writing the spool correctly is subtle, so it is published once as a Go
-  module and an npm package in their own public repository (`eyelock/otel-spool-exporter`,
-  default, 2026-10-05). They are ordinary OpenTelemetry exporters that know nothing of ynr; that
-  repository owns the spool format, and every tool uses them (NFR-8).
+- **The spool exporter is shared and generic.** The Go and JavaScript SDKs do not ship an OTLP
+  file exporter, and writing the spool correctly is subtle, so it is written once, beside the
+  receiver that reads it: a Go module (`github.com/eyelock/ynr/spoolexporter`, released with tags
+  `spoolexporter/v*`) and an npm package (`@eyelock/otel-spool-exporter`), both in the
+  `spoolexporter/` folder of ynr's repository. Each has its own module and depends on nothing
+  else in ynr; they are ordinary OpenTelemetry exporters that know nothing of ynr's roles. The
+  spool format and both ends of it live in one repository, and every tool uses them (NFR-8).
 
 **Reading.** `ynr serve` reads every writer folder with ynr's own spool receiver, including open
 files up to their last complete line, under the hostile-input rules in ADR-003. It ships what it
@@ -148,6 +150,8 @@ turns nothing on.
 
 ## Alternatives
 
+- **A separate public repository for the exporters.** Not chosen: the format would live apart
+  from the receiver that reads it, and a change to it would span two repositories.
 - **Export over the network to a local collector.** Not chosen as the local path: data in memory
   is lost when a process dies, docker-mode runs cannot reach the job's loopback, and each endpoint
   needs an egress exception. Kept only for vendor CLIs, through the relay, and for operators who
@@ -160,7 +164,11 @@ turns nothing on.
 
 ## Consequences
 
-- Each sibling depends on the OpenTelemetry SDK and the public spool exporter for its language.
+- Each sibling depends on the OpenTelemetry SDK and the spool exporter for its language.
+- While ynr's repository is private, fetching the Go module needs a read-only token
+  (`GOPRIVATE=github.com/eyelock/ynr`), in CI and for anyone building a sibling from source. For a
+  public tool such as ynh, that means building from source outside its maintainers' machines and
+  CI waits until ynr is made public; its released binaries are unaffected.
 - A run that is killed leaves its started events and every batch already written.
 
 ## Open questions

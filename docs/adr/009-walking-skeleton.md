@@ -5,7 +5,7 @@ Satisfies: FR-1, FR-2, FR-6, NFR-10, NFR-12, NFR-21
 
 ## Context
 
-The scope is large: a collector distribution in two builds, public spool exporters in two
+The scope is large: a collector distribution in two builds, spool exporters in two
 languages, a relay, a storage layout with compaction and an item index, central, server-rendered
 dashboards, Terraform, registries, a conformance check and three sibling integrations. Several
 assumptions underneath it are untested, and if one fails the design above it changes:

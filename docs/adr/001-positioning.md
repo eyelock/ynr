@@ -77,8 +77,8 @@ There are two flavours over one UI: the local dashboard in `ynr serve` and the f
 
 ## Consequences
 
-- The siblings depend on their language's OpenTelemetry SDK and the public spool exporter
-  package, not on ynr (ADR-004, ADR-006).
+- The siblings depend on their language's OpenTelemetry SDK and the spool exporter package, not
+  on ynr (ADR-004, ADR-006).
 - Building our own storage is bounded to a layout, compaction and named queries; DuckDB and the
   object store do the rest (ADR-005).
 - The full build needs cgo cross-compilation for each platform it ships to.
