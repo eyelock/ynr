@@ -5,6 +5,7 @@
 #   make js        install and build the npm spool exporter (spoolexporter/js)
 #   make build     the slim build into bin/ynr (no cgo), plus linux builds for images
 #   make full      the full build, with DuckDB (cgo), into bin/ynr-full
+#   make generate  the dashboard's templates into Go
 #   make test      the tests
 #   make fmt       format Go and Terraform
 #   make help      this text
@@ -18,9 +19,19 @@ MODULES := . spoolexporter
 # The npm spool exporter.
 JS := spoolexporter/js
 
-.PHONY: check build full test vet lint fmt fmt-check slim-check help clean js js-test
+.PHONY: check build full test vet lint fmt fmt-check slim-check generate generate-check help clean js js-test
 
-check: fmt-check vet lint slim-check js js-test test
+check: fmt-check generate-check vet lint slim-check js js-test test
+
+# The dashboard's templ templates, generated into Go and committed (ADR-005).
+TEMPL := go run github.com/a-h/templ/cmd/templ@v0.3.1070
+
+generate:
+	$(TEMPL) generate -path internal/ui
+
+generate-check:
+	@$(TEMPL) generate -path internal/ui >/dev/null 2>&1
+	@git diff --quiet -- 'internal/ui/*_templ.go' || { echo "generated templates are stale: run make generate and commit"; git diff --stat -- 'internal/ui/*_templ.go'; exit 1; }
 
 help:
 	@sed -n '2,/^$$/p' Makefile | sed -e 's/^# \{0,1\}//'

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sync"
@@ -16,6 +18,7 @@ import (
 	"github.com/eyelock/ynr/internal/query"
 	"github.com/eyelock/ynr/internal/spool"
 	"github.com/eyelock/ynr/internal/store"
+	"github.com/eyelock/ynr/internal/ui"
 )
 
 // maxSocket is the longest Unix socket path every platform accepts (macOS allows 104 bytes).
@@ -58,7 +61,7 @@ func privateDir(dir string) error {
 // startHot runs the hot tier beside ynr serve when the build has DuckDB and the store can be
 // read, and compacts the store: a laptop's ynr serve is its folder's only reader (ADR-005). It never stops serve shipping: a failure is reported and serve carries on. The caller
 // holds the spool's lock, so no other server owns the hot tier's files.
-func startHot(ctx context.Context, root, storeURL string, window, poll time.Duration, stderr io.Writer) (stop func()) {
+func startHot(ctx context.Context, root, storeURL string, window, poll time.Duration, uiLn net.Listener, stderr io.Writer) (stop func()) {
 	if storeURL == "" {
 		return func() {}
 	}
@@ -84,14 +87,37 @@ func startHot(ctx context.Context, root, storeURL string, window, poll time.Dura
 		defer close(done)
 		c := query.DefaultCompaction
 		c.Lookback = window
-		err := query.ServeHot(hctx, query.HotConfig{Path: db, Socket: socket, Store: r, Window: window,
-			Poll: max(poll, 2*time.Second), Compact: &c, Logf: logf})
+		cfg := query.HotConfig{Path: db, Socket: socket, Store: r, Window: window,
+			Poll: max(poll, 2*time.Second), Compact: &c, Logf: logf}
+		if uiLn != nil {
+			cfg.UI = uiLn
+			cfg.UIHandler = func(run query.Runner) http.Handler {
+				return ui.Handler(ui.Config{Runner: run, Spool: root})
+			}
+		}
+		err := query.ServeHot(hctx, cfg)
 		if err != nil && !errors.Is(err, query.ErrSlim) {
-			logf("no hot tier: %v", err)
+			logf("no hot tier, so no queries or dashboard: %v", err)
+		}
+		if uiLn != nil {
+			_ = uiLn.Close() // already closed if the dashboard ran
 		}
 	}()
 	return func() {
 		cancel()
 		<-done
 	}
+}
+
+// listenLoopback listens for the dashboard, refusing any address but this machine's loopback:
+// the local dashboard has no sign-in (ADR-005, NFR-18).
+func listenLoopback(addr string) (net.Listener, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, err
+	}
+	if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+		return nil, fmt.Errorf("%s is not a loopback address; the local dashboard binds only to 127.0.0.1, ::1 or localhost", addr)
+	}
+	return net.Listen("tcp", addr)
 }

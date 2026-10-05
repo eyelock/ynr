@@ -1,6 +1,8 @@
 package query
 
 import (
+	"net"
+	"net/http"
 	"time"
 
 	"github.com/eyelock/ynr/internal/store"
@@ -16,6 +18,9 @@ type HotConfig struct {
 	// Compact, when set, is how this server compacts its store: a laptop's ynr serve compacts
 	// its own folder (ADR-005).
 	Compact *Compaction
+	// UI, when set, serves the dashboard UIHandler builds over the hot tier (--ui).
+	UI        net.Listener
+	UIHandler func(Runner) http.Handler
 	// Logf reports what goes wrong; the hot tier never stops ynr serve shipping.
 	Logf func(format string, args ...any)
 }

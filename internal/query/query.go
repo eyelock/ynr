@@ -133,6 +133,34 @@ GROUP BY ALL
 ORDER BY lane, runs DESC, outcome`,
 	},
 	{
+		Name:    "recent",
+		Help:    "the latest runs, newest first, with their trace ids (--lane to pick one)",
+		Since:   24 * time.Hour,
+		Signals: []string{store.Traces},
+		SQL: `
+SELECT time, coalesce(lane, '(by hand)') AS lane, item_key AS item, coalesce(outcome, '(none)') AS outcome,
+       model, round(duration_ms / 1000, 1) AS duration_s, round(cost_usd, 4) AS cost_usd, trace_id
+FROM spans
+WHERE name = 'ynh.run' AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane)
+ORDER BY time DESC
+LIMIT 200`,
+	},
+	{
+		Name:    "items",
+		Help:    "the work items seen lately, most recent first, with their last outcome",
+		Since:   7 * 24 * time.Hour,
+		Signals: []string{store.Traces},
+		SQL: `
+SELECT item_key AS item, any_value(lane) AS lane, min(time) AS first_seen, max(time) AS last_seen,
+       count(DISTINCT step_id) AS steps, count(DISTINCT trace_id) AS traces,
+       arg_max(outcome, time) FILTER (WHERE outcome IS NOT NULL) AS last_outcome
+FROM spans
+WHERE item_key IS NOT NULL AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane)
+GROUP BY item_key
+ORDER BY last_seen DESC
+LIMIT 200`,
+	},
+	{
 		Name:    "item",
 		Help:    "what happened to one work item, by its key: its steps, runs and events in order",
 		Arg:     "<item key>",

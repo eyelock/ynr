@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -39,7 +40,7 @@ Usage:
   ynr info [--spool <root>] [--format text|json]
   ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>]
             [--collector-id <id>] [--collector-instance <id>] [--poll 1s]
-            [--max-line <bytes>] [--hot-window 168h] [--debug]
+            [--max-line <bytes>] [--hot-window 168h] [--ui 127.0.0.1:4319] [--debug]
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
             [--exit-on-stdin-eof]
@@ -211,11 +212,11 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	maxLine := fs.Int("max-line", spool.DefaultMaxLine, "longest line accepted, in bytes")
 	debug := fs.Bool("debug", false, "also print a summary of what is shipped")
 	hotWindow := fs.Duration("hot-window", 7*24*time.Hour, "how far back the hot tier holds records, for queries (full build only)")
-	ui := fs.String("ui", "", "serve the local dashboard on this address (full build only)")
+	ui := fs.String("ui", env("YNR_UI", ""), "serve the local dashboard on this loopback address, such as 127.0.0.1:4319 (full build only) (YNR_UI)")
 	if err := fs.Parse(args); err != nil {
 		return ExitUsage
 	}
-	if *ui != "" {
+	if *ui != "" && ynr.Build != "full" {
 		_, _ = fmt.Fprintf(stderr, "ynr: this %s build has no dashboard; --ui needs the full build\n", ynr.Build)
 		return ExitConfig
 	}
@@ -261,7 +262,20 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		return ExitAdapter
 	}
 	defer lock.Release()
-	stopHot := startHot(ctx, *root, *storeURL, *hotWindow, *poll, stderr)
+	var uiLn net.Listener
+	if *ui != "" {
+		if uiLn, err = listenLoopback(*ui); err != nil {
+			_, _ = fmt.Fprintf(stderr, "ynr: --ui: %v\n", err)
+			return ExitConfig
+		}
+		if *storeURL == "" {
+			_ = uiLn.Close()
+			_, _ = fmt.Fprintln(stderr, "ynr: --ui needs a store to read: set --store")
+			return ExitConfig
+		}
+		_, _ = fmt.Fprintf(stderr, "ynr: dashboard at http://%s/\n", uiLn.Addr())
+	}
+	stopHot := startHot(ctx, *root, *storeURL, *hotWindow, *poll, uiLn, stderr)
 	defer stopHot()
 	err = collector.Run(ctx, collector.Settings{
 		SpoolRoot:    *root,

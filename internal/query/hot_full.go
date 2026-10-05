@@ -226,11 +226,20 @@ func ServeHot(ctx context.Context, cfg HotConfig) error {
 	}
 	srv := &http.Server{Handler: Handler(h, time.Now), ReadHeaderTimeout: 5 * time.Second}
 	go func() { _ = srv.Serve(ln) }()
+	var ui *http.Server
+	if cfg.UI != nil {
+		ui = &http.Server{Handler: cfg.UIHandler(h), ReadHeaderTimeout: 5 * time.Second,
+			BaseContext: func(net.Listener) context.Context { return ctx }}
+		go func() { _ = ui.Serve(cfg.UI) }()
+	}
 	defer func() {
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(sctx)
 		_ = os.Remove(cfg.Socket)
+		if ui != nil {
+			_ = ui.Shutdown(sctx)
+		}
 	}()
 	tick := time.NewTicker(cfg.Poll)
 	defer tick.Stop()
