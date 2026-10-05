@@ -84,3 +84,17 @@ func TestManifestMustNameItsRun(t *testing.T) {
 		t.Error("garbage accepted")
 	}
 }
+
+func TestParseManifest_UID(t *testing.T) {
+	m, ok := ParseManifest([]byte(`{"run":"r1","lane":"l","uid":1001}`), "r1")
+	if !ok || m.UID == nil || *m.UID != 1001 {
+		t.Fatalf("manifest = %+v, %v", m, ok)
+	}
+	m, ok = ParseManifest([]byte(`{"run":"r1","lane":"l"}`), "r1")
+	if !ok || m.UID != nil {
+		t.Fatalf("manifest without uid = %+v, %v", m, ok)
+	}
+	if _, ok := ParseManifest([]byte(`{"run":"r1","lane":"l","uid":-1}`), "r1"); ok {
+		t.Fatal("accepted a negative uid")
+	}
+}

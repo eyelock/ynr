@@ -16,16 +16,12 @@ func ReadManifest(root, runID string) ([]byte, error) {
 	if !ValidName(runID) {
 		return nil, fmt.Errorf("%w: run id %q", ErrRejected, runID)
 	}
-	_, rootDev, err := dirOwnerAndDev(root)
-	if err != nil {
-		return nil, err
-	}
 	dir := filepath.Join(root, ManifestsDir)
-	owner, _, err := dirOwnerAndDev(dir)
+	owner, dev, err := dirOwnerAndDev(dir)
 	if err != nil {
 		return nil, err
 	}
-	f, _, size, err := openSafe(filepath.Join(dir, runID+".json"), owner, rootDev)
+	f, _, size, err := openSafe(filepath.Join(dir, runID+".json"), []uint32{owner}, dev)
 	if err != nil {
 		return nil, err
 	}

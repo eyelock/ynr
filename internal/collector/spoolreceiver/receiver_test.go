@@ -144,3 +144,26 @@ func TestPermanentRejectionIsSkipped(t *testing.T) {
 		t.Fatalf("counters %+v", s)
 	}
 }
+
+func TestRunUserComesFromTheManifest(t *testing.T) {
+	root := spoolWith(t, map[string]string{
+		"runs/r1/.keep":     "",
+		"manifests/r1.json": `{"run":"r1","lane":"github.com/x#a","uid":4242}`,
+		"runs/r2/.keep":     "",
+		"manifests/r2.json": `{"run":"r2","lane":"github.com/x#a"}`,
+	})
+	r := start(t, root, sinks{new(consumertest.TracesSink), new(consumertest.LogsSink), new(consumertest.MetricsSink)})
+	r.manifests = map[string]manifestResult{}
+	run := func(name string) spool.Writer {
+		return spool.Writer{Class: spool.Run, Name: name, Dir: filepath.Join(root, "runs", name), Rel: "runs/" + name}
+	}
+	if uid, ok := r.runUser(run("r1")); !ok || uid != 4242 {
+		t.Errorf("r1 = %d, %v; want 4242", uid, ok)
+	}
+	if _, ok := r.runUser(run("r2")); ok {
+		t.Error("r2 has no uid in its manifest")
+	}
+	if _, ok := r.runUser(spool.Writer{Class: spool.Local, Name: "local"}); ok {
+		t.Error("only runs have a run user")
+	}
+}

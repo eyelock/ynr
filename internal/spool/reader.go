@@ -37,9 +37,12 @@ type Reader struct {
 	Root     string
 	MaxLine  int
 	Counters *Counters
+	// RunUser returns the user a run writes as, from its manifest, which ynf writes out of the
+	// run's reach. A run in an image writes as the image's user, not the folder's owner, so its
+	// files are accepted from that user too. Nil, or false, accepts only the folder's owner.
+	RunUser func(w Writer) (uid uint32, ok bool)
 
-	pos     *positions
-	rootDev uint64
+	pos *positions
 }
 
 // Init creates a spool root with its state folder and the laptop's local writer folder.
@@ -55,8 +58,7 @@ func Init(root string) error {
 
 // NewReader opens an existing spool root.
 func NewReader(root string, maxLine int) (*Reader, error) {
-	_, dev, err := dirOwnerAndDev(root)
-	if err != nil {
+	if _, _, err := dirOwnerAndDev(root); err != nil {
 		return nil, err
 	}
 	pos, err := loadPositions(root)
@@ -66,7 +68,7 @@ func NewReader(root string, maxLine int) (*Reader, error) {
 	if maxLine <= 0 {
 		maxLine = DefaultMaxLine
 	}
-	return &Reader{Root: root, MaxLine: maxLine, Counters: &Counters{}, pos: pos, rootDev: dev}, nil
+	return &Reader{Root: root, MaxLine: maxLine, Counters: &Counters{}, pos: pos}, nil
 }
 
 // Poll reads every writer folder once, handing each new complete line to h. A file's position
@@ -106,9 +108,13 @@ func (r *Reader) pollWriter(ctx context.Context, w Writer, h Handler, seen map[s
 		}
 		return err
 	}
-	if dev != r.rootDev {
-		r.Counters.Rejected.Add(1)
-		return nil
+	// A writer folder may be its own volume, such as a run's size-limited one: each file is
+	// checked against its folder's device, and nlink == 1 already refuses hard links.
+	owners := []uint32{owner}
+	if w.Class == Run && r.RunUser != nil {
+		if uid, ok := r.RunUser(w); ok && uid != owner {
+			owners = append(owners, uid)
+		}
 	}
 	entries, err := os.ReadDir(w.Dir)
 	if err != nil {
@@ -132,15 +138,15 @@ func (r *Reader) pollWriter(ctx context.Context, w Writer, h Handler, seen map[s
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := r.pollFile(w, filepath.Join(w.Dir, n), owner, h, seen); err != nil {
+		if err := r.pollFile(w, filepath.Join(w.Dir, n), owners, dev, h, seen); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *Reader) pollFile(w Writer, path string, owner uint32, h Handler, seen map[string]bool) error {
-	f, id, size, err := openSafe(path, owner, r.rootDev)
+func (r *Reader) pollFile(w Writer, path string, owners []uint32, dev uint64, h Handler, seen map[string]bool) error {
+	f, id, size, err := openSafe(path, owners, dev)
 	if err != nil {
 		if errors.Is(err, ErrRejected) {
 			r.Counters.Rejected.Add(1)

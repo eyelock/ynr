@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"syscall"
 )
 
@@ -30,11 +31,11 @@ func statOf(fi os.FileInfo) (*syscall.Stat_t, bool) {
 	return st, ok
 }
 
-// openSafe opens path for reading only if it is a regular file with one link, on the root's
-// device, owned by the owner of the folder it is in. It never follows a symbolic link, so a link
-// planted in a writer folder to a manifest, the factory folder or a host file is refused rather
-// than read, shipped or deleted.
-func openSafe(path string, dirOwner uint32, rootDev uint64) (*os.File, identity, int64, error) {
+// openSafe opens path for reading only if it is a regular file with one link, on the same device
+// as the folder it is in, owned by one of owners: the folder's owner, and for a run, the user its
+// manifest names. It never follows a symbolic link, so a link planted in a writer folder to a
+// manifest, the factory folder or a host file is refused rather than read, shipped or deleted.
+func openSafe(path string, owners []uint32, dirDev uint64) (*os.File, identity, int64, error) {
 	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		if errors.Is(err, syscall.ELOOP) {
@@ -60,10 +61,10 @@ func openSafe(path string, dirOwner uint32, rootDev uint64) (*os.File, identity,
 		return reject("is not a regular file")
 	case st.Nlink != 1:
 		return reject("has more than one link")
-	case devNum(st.Dev) != rootDev:
-		return reject("is on another device")
-	case st.Uid != dirOwner:
-		return reject("is not owned by its folder's owner")
+	case devNum(st.Dev) != dirDev:
+		return reject("is on another device than its folder")
+	case !slices.Contains(owners, st.Uid):
+		return reject("is not owned by its folder's owner or the run's user")
 	}
 	return f, identity{Dev: devNum(st.Dev), Ino: st.Ino}, fi.Size(), nil
 }
