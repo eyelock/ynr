@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/eyelock/ynr/internal/relay"
 	"github.com/eyelock/ynr/internal/spool"
 	"github.com/eyelock/ynr/internal/stamp"
+	"github.com/eyelock/ynr/internal/store"
 )
 
 // Exit codes, following ynf's.
@@ -35,8 +37,9 @@ const usage = `ynr: your named reporting
 Usage:
   ynr version
   ynr info [--spool <root>] [--format text|json]
-  ynr serve [--spool <root>] [--collector-id <id>] [--collector-instance <id>]
-            --upstream <otlp-http-endpoint> [--poll 1s] [--max-line <bytes>] [--debug]
+  ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>]
+            [--collector-id <id>] [--collector-instance <id>] [--poll 1s]
+            [--max-line <bytes>] [--debug]
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
             [--exit-on-stdin-eof]
@@ -45,8 +48,11 @@ ynr relay prints its OTLP/HTTP endpoint as its first line of output, then runs u
 stopped (Ctrl-C, SIGTERM, or with --exit-on-stdin-eof its standard input closing), flushing what
 it received into the folder.
 
-Environment fallbacks: YNR_SPOOL_ROOT, YNR_COLLECTOR_ID, YNR_COLLECTOR_INSTANCE, YNR_UPSTREAM,
-and YNR_SPOOL for the relay's folder.
+ynr serve ships to a store, by default a folder on this machine, and optionally also forwards to
+an OTLP/HTTP endpoint. --store "" ships only to the upstream.
+
+Environment fallbacks: YNR_SPOOL_ROOT, YNR_STORE, YNR_UPSTREAM, YNR_COLLECTOR_ID,
+YNR_COLLECTOR_INSTANCE, and YNR_SPOOL for the relay's folder.
 `
 
 // stdin is the relay's standard input, replaced in tests.
@@ -100,6 +106,29 @@ func defaultRoot() string {
 		return ""
 	}
 	return r
+}
+
+// envOr is env for a flag whose default is computed, where an empty variable still counts:
+// YNR_STORE="" turns the store off.
+func envOr(name, def string) string {
+	if v, ok := os.LookupEnv(name); ok {
+		return v
+	}
+	return def
+}
+
+// defaultStore is the laptop's folder store: $XDG_DATA_HOME/ynr/store, or
+// ~/.local/share/ynr/store.
+func defaultStore() string {
+	base := os.Getenv("XDG_DATA_HOME")
+	if base == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		base = filepath.Join(home, ".local", "share")
+	}
+	return store.FolderURL(filepath.Join(base, "ynr", "store"))
 }
 
 // infoReport is ynr info's JSON (ADR-004).
@@ -162,7 +191,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	root := fs.String("spool", defaultRoot(), "spool root (YNR_SPOOL_ROOT)")
 	id := fs.String("collector-id", env("YNR_COLLECTOR_ID", defaultCollectorID()), "this collector's identity: a runner pool or host (YNR_COLLECTOR_ID)")
 	instance := fs.String("collector-instance", env("YNR_COLLECTOR_INSTANCE", ""), "the job within the pool, recorded as data (YNR_COLLECTOR_INSTANCE)")
-	upstream := fs.String("upstream", env("YNR_UPSTREAM", ""), "OTLP/HTTP endpoint to ship to, such as http://localhost:4318 (YNR_UPSTREAM)")
+	storeURL := fs.String("store", envOr("YNR_STORE", defaultStore()), "object store to ship batches to, such as file:///path; empty for none (YNR_STORE)")
+	upstream := fs.String("upstream", env("YNR_UPSTREAM", ""), "OTLP/HTTP endpoint to also forward to, such as http://localhost:4318 (YNR_UPSTREAM)")
 	poll := fs.Duration("poll", time.Second, "how often to read the spool")
 	maxLine := fs.Int("max-line", spool.DefaultMaxLine, "longest line accepted, in bytes")
 	debug := fs.Bool("debug", false, "also print a summary of what is shipped")
@@ -181,12 +211,18 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	case !idPattern.MatchString(*id):
 		_, _ = fmt.Fprintf(stderr, "ynr: --collector-id %q must be lower-case letters, digits, '.', '_' or '-'\n", *id)
 		return ExitConfig
-	case *upstream == "":
-		_, _ = fmt.Fprintln(stderr, "ynr: --upstream is required until the object store arrives (ADR-009, slice 2)")
+	case *upstream == "" && *storeURL == "":
+		_, _ = fmt.Fprintln(stderr, "ynr: nowhere to ship: set --store, --upstream, or both")
 		return ExitConfig
 	case *maxLine <= 0:
 		_, _ = fmt.Fprintln(stderr, "ynr: --max-line must be positive")
 		return ExitConfig
+	}
+	if *storeURL != "" {
+		if _, err := store.Open(*storeURL); err != nil {
+			_, _ = fmt.Fprintf(stderr, "ynr: --store: %v\n", err)
+			return ExitConfig
+		}
 	}
 	if err := spool.Init(*root); err != nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: creating the spool: %v\n", err)
@@ -212,6 +248,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		PollInterval: *poll,
 		MaxLine:      *maxLine,
 		Identity:     stamp.Identity{ID: *id, Instance: *instance},
+		Store:        *storeURL,
 		Upstream:     *upstream,
 		Debug:        *debug,
 	})

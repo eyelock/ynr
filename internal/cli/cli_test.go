@@ -64,7 +64,8 @@ func TestServeRefusals(t *testing.T) {
 		msg  string
 	}{
 		{"ui in slim", []string{"--spool", root, "--upstream", "http://x", "--ui", ":8080"}, ExitConfig, "full build"},
-		{"no upstream", []string{"--spool", root}, ExitConfig, "--upstream"},
+		{"nowhere to ship", []string{"--spool", root, "--store", ""}, ExitConfig, "nowhere to ship"},
+		{"bad store", []string{"--spool", root, "--store", "s3://bucket"}, ExitConfig, "--store"},
 		{"bad collector id", []string{"--spool", root, "--upstream", "http://x", "--collector-id", "Bad Id"}, ExitConfig, "collector-id"},
 	}
 	for _, c := range cases {

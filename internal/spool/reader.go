@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 )
 
 // ErrMalformed is returned by a Handler for a line it cannot parse; the line is skipped and
@@ -42,7 +43,21 @@ type Reader struct {
 	// files are accepted from that user too. Nil, or false, accepts only the folder's owner.
 	RunUser func(w Writer) (uid uint32, ok bool)
 
-	pos *positions
+	// Ship, when set, makes the reader batch (ADR-005): a file is read only once it is due,
+	// and after its new lines have gone to the handler, Ship is called with the file's source
+	// name and the byte range read. The position is committed only if Ship succeeds, so a batch
+	// is never lost between reading and shipping. Without Ship every poll reads everything new.
+	Ship func(w Writer, source string, from, to int64) error
+	// ShipAge and ShipBytes say when a file is due: once its unshipped bytes are ShipAge old or
+	// reach ShipBytes. A closed file is always due.
+	ShipAge   time.Duration
+	ShipBytes int64
+	// Force makes every file due, for the final flush on shutdown.
+	Force bool
+
+	pos     *positions
+	pending map[string]time.Time // when each file's unshipped bytes were first seen
+	now     func() time.Time
 }
 
 // Init creates a spool root with its state folder and the laptop's local writer folder.
@@ -68,7 +83,7 @@ func NewReader(root string, maxLine int) (*Reader, error) {
 	if maxLine <= 0 {
 		maxLine = DefaultMaxLine
 	}
-	return &Reader{Root: root, MaxLine: maxLine, Counters: &Counters{}, pos: pos}, nil
+	return &Reader{Root: root, MaxLine: maxLine, Counters: &Counters{}, pos: pos, pending: map[string]time.Time{}, now: time.Now}, nil
 }
 
 // Poll reads every writer folder once, handing each new complete line to h. A file's position
@@ -83,6 +98,11 @@ func (r *Reader) Poll(ctx context.Context, h Handler) error {
 	seen := map[string]bool{}
 	defer func() {
 		r.pos.prune(seen)
+		for k := range r.pending {
+			if !seen[k] {
+				delete(r.pending, k)
+			}
+		}
 		_ = r.pos.save()
 	}()
 	for _, w := range writers {
@@ -164,12 +184,21 @@ func (r *Reader) pollFile(w Writer, path string, owners []uint32, dev uint64, h 
 	if offset > size {
 		offset = 0 // replaced or truncated: start again
 	}
+	closed := !strings.HasSuffix(path, OpenSuffix)
+	if r.Ship != nil && !r.due(key, size-offset, closed) {
+		return nil
+	}
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return err
 	}
 	consumed, handErr := r.readLines(w, bufio.NewReaderSize(io.LimitReader(f, size-offset), 64<<10), h)
+	if r.Ship != nil && consumed > 0 {
+		if err := r.Ship(w, Source(w, path), offset, offset+consumed); err != nil {
+			return fmt.Errorf("%s: shipping: %w", w.Rel, err)
+		}
+	}
+	delete(r.pending, key)
 	committed := offset + consumed
-	closed := !strings.HasSuffix(path, OpenSuffix)
 	if handErr == nil && closed && committed < size {
 		// A closed file ending without a newline: the remainder can never become a line.
 		r.Counters.Malformed.Add(1)
@@ -244,4 +273,26 @@ func (r *Reader) readLines(w Writer, br *bufio.Reader, h Handler) (int64, error)
 		consumed += total
 		reset()
 	}
+}
+
+// due reports whether a file's unshipped bytes should be read and shipped now.
+func (r *Reader) due(key string, unshipped int64, closed bool) bool {
+	if r.Force || closed || unshipped <= 0 || (r.ShipBytes > 0 && unshipped >= r.ShipBytes) {
+		return true
+	}
+	first, ok := r.pending[key]
+	if !ok {
+		r.pending[key] = r.now()
+		return r.ShipAge <= 0
+	}
+	return r.now().Sub(first) >= r.ShipAge
+}
+
+// Source names a spool file in batch keys: its writer folder and its name without the suffix,
+// the same whether the file is still open or closed.
+func Source(w Writer, path string) string {
+	base := filepath.Base(path)
+	base = strings.TrimSuffix(base, OpenSuffix)
+	base = strings.TrimSuffix(base, ClosedSuffix)
+	return strings.ReplaceAll(w.Rel, "/", ".") + "." + base
 }

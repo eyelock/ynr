@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type got struct {
@@ -261,5 +262,71 @@ func TestLock(t *testing.T) {
 	l.Release()
 	if info, _ := Holder(root); info != nil {
 		t.Fatalf("holder after release = %+v", info)
+	}
+}
+
+// TestShipCommitsOnlyWhatIsStored: with Ship set, a file's position advances and a closed file
+// is deleted only once its batch is stored; a failed store re-reads the same range next time.
+func TestShipCommitsOnlyWhatIsStored(t *testing.T) {
+	root := setup(t)
+	closed := filepath.Join(root, "local", "a-1-000001.jsonl")
+	writeFile(t, closed, "{\"a\":1}\n{\"a\":2}\n")
+	r := newReader(t, root, 0)
+	type shipped struct {
+		source   string
+		from, to int64
+	}
+	var ships []shipped
+	fail := true
+	r.Ship = func(_ Writer, source string, from, to int64) error {
+		if fail {
+			return errors.New("store down")
+		}
+		ships = append(ships, shipped{source, from, to})
+		return nil
+	}
+	if err := r.Poll(context.Background(), func(Writer, []byte) error { return nil }); err == nil {
+		t.Fatal("a failed shipment must fail the poll")
+	}
+	if _, err := os.Stat(closed); err != nil {
+		t.Fatal("deleted a file whose batch was never stored")
+	}
+	fail = false
+	if got := poll(t, r); len(got) != 2 {
+		t.Fatalf("re-read %d lines, want both again", len(got))
+	}
+	if len(ships) != 1 || ships[0] != (shipped{"local.a-1-000001", 0, 16}) {
+		t.Fatalf("ships = %+v", ships)
+	}
+	if _, err := os.Stat(closed); !os.IsNotExist(err) {
+		t.Fatal("kept a file whose batch was stored")
+	}
+}
+
+// TestShipWaitsUntilDue: an open file is read only once its unshipped lines are old or large
+// enough, or on the final flush.
+func TestShipWaitsUntilDue(t *testing.T) {
+	root := setup(t)
+	open := filepath.Join(root, "local", "a-1-000001.open.jsonl")
+	writeFile(t, open, "{\"a\":1}\n")
+	r := newReader(t, root, 0)
+	now := time.Unix(1000, 0)
+	r.now = func() time.Time { return now }
+	r.ShipAge, r.ShipBytes = 15*time.Second, 1<<20
+	r.Ship = func(Writer, string, int64, int64) error { return nil }
+	if got := poll(t, r); len(got) != 0 {
+		t.Fatalf("read %d lines before they were due", len(got))
+	}
+	now = now.Add(16 * time.Second)
+	if got := poll(t, r); len(got) != 1 {
+		t.Fatalf("read %d lines once due, want 1", len(got))
+	}
+	appendFile(t, open, "{\"a\":2}\n")
+	if got := poll(t, r); len(got) != 0 {
+		t.Fatal("read new lines before they were due")
+	}
+	r.Force = true
+	if got := poll(t, r); len(got) != 1 {
+		t.Fatal("the final flush did not read the waiting line")
 	}
 }
