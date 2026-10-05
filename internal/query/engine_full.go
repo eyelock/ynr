@@ -45,10 +45,13 @@ const (
 		`exponentialHistogram STRUCT(dataPoints ` + hpoint + `[], aggregationTemporality JSON))[])[])[]`
 )
 
-var signals = []struct{ name, column, typ string }{
-	{store.Traces, "resourceSpans", tracesType},
-	{store.Logs, "resourceLogs", logsType},
-	{store.Metrics, "resourceMetrics", metricsT},
+// signal is a signal's OTLP column and type, and the table the named queries read it as.
+type signal struct{ name, column, typ, table string }
+
+var signals = []signal{
+	{store.Traces, "resourceSpans", tracesType, "spans"},
+	{store.Logs, "resourceLogs", logsType, "logs"},
+	{store.Metrics, "resourceMetrics", metricsT, "metric_points"},
 }
 
 // The columns every view promotes from attributes, for queries and dashboards to filter on
@@ -90,12 +93,9 @@ func Run(ctx context.Context, r store.Reader, q *Query, p Params) (*Result, erro
 	if err := q.Check(p); err != nil {
 		return nil, err
 	}
-	files := map[string][]string{}
-	for _, s := range q.Signals {
-		var err error
-		if files[s], err = batches(ctx, r, s, Hours(p.Since, p.Until)); err != nil {
-			return nil, err
-		}
+	files, err := ReadHours(ctx, r, q.Signals, Hours(p.Since, p.Until))
+	if err != nil {
+		return nil, err
 	}
 	db, err := sql.Open("duckdb", "")
 	if err != nil {
@@ -104,10 +104,7 @@ func Run(ctx context.Context, r store.Reader, q *Query, p Params) (*Result, erro
 	defer func() { _ = db.Close() }()
 	// One connection, so the macros and views exist for the query that follows.
 	db.SetMaxOpenConns(1)
-	setup := macros + batchSQL(files) + `
-CREATE VIEW spans AS FROM batch_spans;
-CREATE VIEW logs AS FROM batch_logs;
-CREATE VIEW metric_points AS FROM batch_metric_points;`
+	setup := macros + batchSQL(files.Batches) + combinedSQL(files.Parts)
 	if _, err := db.ExecContext(ctx, setup); err != nil {
 		return nil, fmt.Errorf("query: preparing the views: %w", err)
 	}
@@ -121,6 +118,30 @@ func batchSQL(files map[string][]string) string {
 		s = strings.ReplaceAll(s, "@"+sig.name+"@", relation(sig.column, sig.typ, files[sig.name]))
 	}
 	return s
+}
+
+// combinedSQL defines spans, logs and metric_points as the batch views together with the
+// compacted parts, keeping one copy of each record: a batch re-shipped after its hour was
+// compacted holds records the part already has.
+func combinedSQL(parts map[string][]string) string {
+	var b strings.Builder
+	for _, sig := range signals {
+		src := "SELECT * FROM batch_" + sig.table
+		if ps := parts[sig.name]; len(ps) > 0 {
+			src += " UNION ALL BY NAME SELECT * FROM " + parquet(ps)
+		}
+		fmt.Fprintf(&b, "\nCREATE OR REPLACE VIEW %s AS SELECT * FROM (%s)\nQUALIFY row_number() OVER (PARTITION BY record_id ORDER BY file) = 1;\n", sig.table, src)
+	}
+	return b.String()
+}
+
+// parquet reads compacted parts.
+func parquet(files []string) string {
+	quoted := make([]string, len(files))
+	for i, f := range files {
+		quoted[i] = literal(f)
+	}
+	return "read_parquet([" + strings.Join(quoted, ", ") + "])"
 }
 
 // runOn runs a named query on a database that has spans, logs and metric_points.
@@ -151,23 +172,6 @@ func runOn(ctx context.Context, db *sql.DB, q *Query, p Params) (*Result, error)
 		res.Rows = append(res.Rows, vals)
 	}
 	return res, rows.Err()
-}
-
-// batches lists a signal's batch files received in the given hours.
-func batches(ctx context.Context, r store.Reader, signal string, hours []time.Time) ([]string, error) {
-	var files []string
-	for _, h := range hours {
-		keys, err := r.List(ctx, HourPrefix(signal, h))
-		if err != nil {
-			return nil, err
-		}
-		for _, k := range keys {
-			if strings.HasSuffix(k, ".jsonl.gz") {
-				files = append(files, r.Location(k))
-			}
-		}
-	}
-	return files, nil
 }
 
 // relation reads the files as newline-delimited OTLP JSON, or is empty with the same columns

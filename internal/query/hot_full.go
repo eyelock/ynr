@@ -92,15 +92,22 @@ func (h *Hot) Sync(ctx context.Context) error {
 	}
 	var errs []error
 	for _, sig := range signals {
-		keys, err := h.newKeys(ctx, sig.name, all)
-		if err != nil {
-			errs = append(errs, err)
-			continue
+		var parts, batches []string
+		for _, t := range all {
+			hr, err := ReadHour(ctx, h.r, sig.name, t)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			parts = append(parts, h.unseen(hr.Parts)...)
+			batches = append(batches, h.unseen(hr.Batches)...)
 		}
-		for len(keys) > 0 {
-			n := min(chunk, len(keys))
-			errs = append(errs, h.ingest(ctx, sig.name, keys[:n], now))
-			keys = keys[n:]
+		for _, keys := range [][]string{parts, batches} {
+			for len(keys) > 0 {
+				n := min(chunk, len(keys))
+				errs = append(errs, h.ingest(ctx, sig.name, keys[:n], now))
+				keys = keys[n:]
+			}
 		}
 	}
 	if now.Sub(h.evicted) >= time.Hour {
@@ -110,23 +117,18 @@ func (h *Hot) Sync(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (h *Hot) newKeys(ctx context.Context, signal string, hours []time.Time) ([]string, error) {
+func (h *Hot) unseen(keys []string) []string {
 	var out []string
-	for _, t := range hours {
-		keys, err := h.r.List(ctx, HourPrefix(signal, t))
-		if err != nil {
-			return nil, err
-		}
-		for _, k := range keys {
-			if strings.HasSuffix(k, ".jsonl.gz") && !h.seen[k] {
-				out = append(out, k)
-			}
+	for _, k := range keys {
+		if !h.seen[k] {
+			out = append(out, k)
 		}
 	}
-	return out, nil
+	return out
 }
 
-// ingest adds the records in a signal's batch files that the hot tier does not hold yet. If the
+// ingest adds the records in a signal's batch files or compacted parts (never both at once)
+// that the hot tier does not hold yet. If the
 // files cannot be read together, each is read alone, and one that still fails is counted and
 // skipped, so a damaged file never blocks the rest.
 func (h *Hot) ingest(ctx context.Context, signal string, keys []string, now time.Time) error {
@@ -152,19 +154,27 @@ func (h *Hot) insert(ctx context.Context, signal string, keys []string, now time
 	for i, k := range keys {
 		files[i] = h.r.Location(k)
 	}
-	table := map[string]string{store.Traces: "spans", store.Logs: "logs", store.Metrics: "metric_points"}[signal]
+	var sig = signals[0]
+	for _, x := range signals {
+		if x.name == signal {
+			sig = x
+		}
+	}
 	conn, err := h.db.Conn(ctx)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = conn.Close() }()
-	if _, err := conn.ExecContext(ctx, batchSQL(map[string][]string{signal: files})); err != nil {
+	src := "batch_" + sig.table
+	if _, _, err := store.ParseCompacted(keys[0]); err == nil {
+		src = parquet(files)
+	} else if _, err := conn.ExecContext(ctx, batchSQL(map[string][]string{signal: files})); err != nil {
 		return fmt.Errorf("hot tier: %w", err)
 	}
-	stmt := fmt.Sprintf(`INSERT INTO %[1]s
-SELECT * FROM batch_%[1]s b
+	stmt := fmt.Sprintf(`INSERT INTO %s BY NAME
+SELECT * FROM %s b
 WHERE (b.time IS NULL OR b.time >= $since)
-  AND NOT EXISTS (SELECT 1 FROM %[1]s t WHERE t.record_id = b.record_id)`, table)
+  AND NOT EXISTS (SELECT 1 FROM %s t WHERE t.record_id = b.record_id)`, sig.table, src, sig.table)
 	if _, err := conn.ExecContext(ctx, stmt, sql.Named("since", now.Add(-h.window))); err != nil {
 		return fmt.Errorf("hot tier: reading %d %s batches: %w", len(keys), signal, err)
 	}
@@ -224,9 +234,16 @@ func ServeHot(ctx context.Context, cfg HotConfig) error {
 	}()
 	tick := time.NewTicker(cfg.Poll)
 	defer tick.Stop()
+	var compacted time.Time
 	for {
 		if err := h.Sync(ctx); err != nil && ctx.Err() == nil {
 			cfg.Logf("hot tier: %v", err)
+		}
+		if cfg.Compact != nil && time.Since(compacted) >= time.Minute {
+			compacted = time.Now()
+			if _, err := Compact(ctx, cfg.Store, *cfg.Compact, compacted); err != nil && ctx.Err() == nil {
+				cfg.Logf("compaction: %v", err)
+			}
 		}
 		select {
 		case <-ctx.Done():

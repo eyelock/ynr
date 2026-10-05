@@ -56,7 +56,7 @@ func privateDir(dir string) error {
 }
 
 // startHot runs the hot tier beside ynr serve when the build has DuckDB and the store can be
-// read. It never stops serve shipping: a failure is reported and serve carries on. The caller
+// read, and compacts the store: a laptop's ynr serve is its folder's only reader (ADR-005). It never stops serve shipping: a failure is reported and serve carries on. The caller
 // holds the spool's lock, so no other server owns the hot tier's files.
 func startHot(ctx context.Context, root, storeURL string, window, poll time.Duration, stderr io.Writer) (stop func()) {
 	if storeURL == "" {
@@ -82,7 +82,10 @@ func startHot(ctx context.Context, root, storeURL string, window, poll time.Dura
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		err := query.ServeHot(hctx, query.HotConfig{Path: db, Socket: socket, Store: r, Window: window, Poll: max(poll, 2*time.Second), Logf: logf})
+		c := query.DefaultCompaction
+		c.Lookback = window
+		err := query.ServeHot(hctx, query.HotConfig{Path: db, Socket: socket, Store: r, Window: window,
+			Poll: max(poll, 2*time.Second), Compact: &c, Logf: logf})
 		if err != nil && !errors.Is(err, query.ErrSlim) {
 			logf("no hot tier: %v", err)
 		}

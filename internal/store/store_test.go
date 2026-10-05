@@ -132,3 +132,59 @@ func TestFolderListsWhatWasPut(t *testing.T) {
 		t.Fatalf("location = %s", got)
 	}
 }
+
+func TestOnlyExactKeysParse(t *testing.T) {
+	at := time.Date(2026, 10, 5, 21, 0, 0, 0, time.UTC)
+	good := BatchKey(Traces, at, "laptop", NewULID(at), "local.ynh-1-000001", 0, 10)
+	b, err := ParseBatch(good)
+	if err != nil || b.Signal != Traces || !b.Hour.Equal(at) || b.Collector != "laptop" || b.Source != "local.ynh-1-000001-0-10" {
+		t.Fatalf("%s = %+v, %v", good, b, err)
+	}
+	for _, bad := range []string{
+		"traces/2026/13/05/21/laptop/01M46ZGNYMGVGPGTJE69223MFB_x-0-1.jsonl.gz",           // month 13
+		"traces/2026/10/05/21/a/b/01M46ZGNYMGVGPGTJE69223MFB_x-0-1.jsonl.gz",              // too deep
+		"compacted/traces/2026/10/05/21/laptop/01M46ZGNYMGVGPGTJE69223MFB_x-0-1.jsonl.gz", // another prefix
+		"traces/2026/10/05/21/Laptop/01M46ZGNYMGVGPGTJE69223MFB_x-0-1.jsonl.gz",           // collector id
+		"traces/2026/10/05/21/laptop/notaulid_x-0-1.jsonl.gz",
+	} {
+		if _, err := ParseBatch(bad); err == nil {
+			t.Errorf("parsed %s", bad)
+		}
+	}
+	for key, want := range map[string]struct {
+		n        int
+		manifest bool
+	}{PartKey(Logs, at, 3): {3, false}, ManifestKey(Logs, at, 12): {12, true}} {
+		if n, m, err := ParseCompacted(key); err != nil || n != want.n || m != want.manifest {
+			t.Errorf("%s = %d %v %v", key, n, m, err)
+		}
+	}
+	for _, bad := range []string{"compacted/logs/2026/10/05/21/part-0.parquet", "compacted/logs/2026/10/05/21/part-1.json", "compacted/logs/2026/10/05/21/x/part-1.parquet"} {
+		if _, _, err := ParseCompacted(bad); err == nil {
+			t.Errorf("parsed %s", bad)
+		}
+	}
+}
+
+func TestFolderGetAndDelete(t *testing.T) {
+	r, err := OpenReader(FolderURL(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if err := r.Put(ctx, "a/b", []byte("x")); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := r.Get(ctx, "a/b"); err != nil || string(b) != "x" {
+		t.Fatalf("get = %q %v", b, err)
+	}
+	if err := r.Delete(ctx, "a/b"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Get(ctx, "a/b"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("after delete: %v", err)
+	}
+	if err := r.Delete(ctx, "a/b"); err != nil {
+		t.Fatalf("deleting twice: %v", err)
+	}
+}

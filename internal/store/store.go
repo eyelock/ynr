@@ -122,6 +122,10 @@ type Reader interface {
 	List(ctx context.Context, prefix string) ([]string, error)
 	// Location is where DuckDB reads a key: a path for a folder, a URL for a bucket.
 	Location(key string) string
+	// Get reads a whole object. A missing one is an error that matches os.ErrNotExist.
+	Get(ctx context.Context, key string) ([]byte, error)
+	// Delete removes an object; one already gone is not an error.
+	Delete(ctx context.Context, key string) error
 }
 
 // OpenReader opens a store for reading from its URL.
@@ -172,4 +176,23 @@ func (f *Folder) List(_ context.Context, prefix string) ([]string, error) {
 // Location is the object's path on this machine.
 func (f *Folder) Location(key string) string {
 	return filepath.Join(f.root, filepath.FromSlash(key))
+}
+
+// Get reads the object.
+func (f *Folder) Get(_ context.Context, key string) ([]byte, error) {
+	if !ValidKey(key) {
+		return nil, fmt.Errorf("store: invalid key %q", key)
+	}
+	return os.ReadFile(f.Location(key))
+}
+
+// Delete removes the object.
+func (f *Folder) Delete(_ context.Context, key string) error {
+	if !ValidKey(key) {
+		return fmt.Errorf("store: invalid key %q", key)
+	}
+	if err := os.Remove(f.Location(key)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
 }

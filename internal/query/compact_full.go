@@ -1,0 +1,134 @@
+//go:build full
+
+package query
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"time"
+
+	"github.com/eyelock/ynr/internal/store"
+)
+
+// Compact compacts every closed hour in the lookback that has batches its manifest does not
+// cover, and deletes what newer manifests have made redundant once it has been kept long enough.
+// A new part holds the hour's previous part and its new batches, so batches can be deleted.
+func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (compacted int, err error) {
+	now = now.UTC()
+	last := now.Add(-time.Hour - c.Grace).Truncate(time.Hour) // the last hour closed for long enough
+	var errs []error
+	for _, sig := range signals {
+		for t := now.Add(-c.Lookback).Truncate(time.Hour); !t.After(last); t = t.Add(time.Hour) {
+			h, err := ReadHour(ctx, r, sig.name, t)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if len(h.Batches) > 0 {
+				if err := compactHour(ctx, r, sig, t, h, now); err != nil {
+					errs = append(errs, fmt.Errorf("compacting %s %s: %w", sig.name, t.Format("2006-01-02T15"), err))
+					continue
+				}
+				compacted++
+				if h, err = ReadHour(ctx, r, sig.name, t); err != nil {
+					errs = append(errs, err)
+					continue
+				}
+			}
+			errs = append(errs, prune(ctx, r, h, c.Keep, now))
+		}
+	}
+	return compacted, errors.Join(errs...)
+}
+
+func compactHour(ctx context.Context, r store.Reader, sig signal, hour time.Time, h *Hour, now time.Time) error {
+	n := 1
+	var covered []string
+	var parts []string
+	if h.Manifest != nil {
+		n = h.Manifest.N + 1
+		covered = append(covered, h.Manifest.Batches...)
+		for _, p := range h.Parts {
+			parts = append(parts, r.Location(p))
+		}
+	}
+	var batches []string
+	for _, k := range h.Batches {
+		batches = append(batches, r.Location(k))
+	}
+	partKey := store.PartKey(sig.name, hour, n)
+
+	tmp, err := os.MkdirTemp("", "ynr-compact-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(tmp) }()
+	out := filepath.Join(tmp, "part.parquet")
+
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+	setup := macros + batchSQL(map[string][]string{sig.name: batches}) +
+		combinedSQL(map[string][]string{sig.name: parts})
+	if _, err := db.ExecContext(ctx, setup); err != nil {
+		return err
+	}
+	// The part keeps each record once, ordered by time, and names itself as every record's file.
+	copySQL := fmt.Sprintf("COPY (SELECT * REPLACE (%s AS file) FROM %s ORDER BY time, record_id) TO %s (FORMAT parquet, COMPRESSION zstd)",
+		literal(partKey), sig.table, literal(out))
+	if _, err := db.ExecContext(ctx, copySQL); err != nil {
+		return err
+	}
+	var records int64
+	if err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+parquet([]string{out})).Scan(&records); err != nil {
+		return err
+	}
+	data, err := os.ReadFile(out)
+	if err != nil {
+		return err
+	}
+	if err := r.Put(ctx, partKey, data); err != nil {
+		return err
+	}
+	m := Manifest{Signal: sig.name, Hour: hour.UTC(), N: n, Parts: []string{partKey},
+		Batches: append(covered, h.Batches...), Records: records, Compacted: now}
+	slices.Sort(m.Batches)
+	m.Batches = slices.Compact(m.Batches)
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	// The manifest last: until it lands, readers read the batches, and the part is unused.
+	return r.Put(ctx, store.ManifestKey(sig.name, hour, n), append(b, '\n'))
+}
+
+// prune deletes, once the latest manifest is older than keep, the batches it covers and the
+// parts and manifests it supersedes.
+func prune(ctx context.Context, r store.Reader, h *Hour, keep time.Duration, now time.Time) error {
+	if h.Manifest == nil || now.Sub(h.Manifest.Compacted) < keep {
+		return nil
+	}
+	latest := map[string]bool{store.ManifestKey(h.Manifest.Signal, h.Manifest.Hour, h.Manifest.N): true}
+	for _, p := range h.Manifest.Parts {
+		latest[p] = true
+	}
+	var errs []error
+	for _, k := range h.Covered {
+		errs = append(errs, r.Delete(ctx, k))
+	}
+	for _, k := range h.All {
+		if !latest[k] {
+			errs = append(errs, r.Delete(ctx, k))
+		}
+	}
+	return errors.Join(errs...)
+}
