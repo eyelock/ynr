@@ -17,6 +17,7 @@ import (
 
 	"github.com/eyelock/ynr"
 	"github.com/eyelock/ynr/internal/collector"
+	"github.com/eyelock/ynr/internal/relay"
 	"github.com/eyelock/ynr/internal/spool"
 	"github.com/eyelock/ynr/internal/stamp"
 )
@@ -36,8 +37,14 @@ Usage:
   ynr info [--spool <root>] [--format text|json]
   ynr serve [--spool <root>] [--collector-id <id>] [--collector-instance <id>]
             --upstream <otlp-http-endpoint> [--poll 1s] [--max-line <bytes>] [--debug]
+  ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
+            [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
 
-Environment fallbacks: YNR_SPOOL_ROOT, YNR_COLLECTOR_ID, YNR_COLLECTOR_INSTANCE, YNR_UPSTREAM.
+ynr relay prints its OTLP/HTTP endpoint as its first line of output, then runs until it is
+stopped (Ctrl-C or SIGTERM), flushing what it received into the folder.
+
+Environment fallbacks: YNR_SPOOL_ROOT, YNR_COLLECTOR_ID, YNR_COLLECTOR_INSTANCE, YNR_UPSTREAM,
+and YNR_SPOOL for the relay's folder.
 `
 
 // Run runs one command and returns its exit code.
@@ -54,6 +61,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return info(args[1:], stdout, stderr)
 	case "serve":
 		return serve(ctx, args[1:], stderr)
+	case "relay":
+		return relayCmd(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return ExitOK
@@ -202,6 +211,59 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		Debug:        *debug,
 	})
 	if err != nil && ctx.Err() == nil {
+		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
+		return ExitAdapter
+	}
+	return ExitOK
+}
+
+// relayReady is ynr relay's first line of output with --format json.
+type relayReady struct {
+	Endpoint string `json:"endpoint"`
+	PID      int    `json:"pid"`
+}
+
+func relayCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := flags("relay", stderr)
+	dir := fs.String("spool", os.Getenv("YNR_SPOOL"), "writer folder to write into, such as a run's folder (YNR_SPOOL)")
+	listen := fs.String("listen", relay.DefaultListen, "loopback address; port 0 picks a free port")
+	format := fs.String("format", "text", "first line of output: the endpoint as text, or json")
+	maxRequest := fs.Int64("max-request", relay.DefaultMaxRequest, "largest request accepted, in bytes after decompression")
+	maxMemory := fs.Int64("max-memory", relay.DefaultMaxMemory, "most bytes of requests held at once")
+	perSecond := fs.Float64("rate", relay.DefaultRate, "requests accepted a second, sustained")
+	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+	switch {
+	case *dir == "":
+		_, _ = fmt.Fprintln(stderr, "ynr: no folder: set --spool or YNR_SPOOL")
+		return ExitConfig
+	case *format != "text" && *format != "json":
+		_, _ = fmt.Fprintln(stderr, "ynr: --format must be text or json")
+		return ExitUsage
+	case *maxRequest <= 0 || *maxMemory <= 0 || *perSecond <= 0:
+		_, _ = fmt.Fprintln(stderr, "ynr: --max-request, --max-memory and --rate must be positive")
+		return ExitConfig
+	}
+	r, err := relay.New(relay.Config{
+		Dir: *dir, Listen: *listen, MaxRequest: *maxRequest, MaxMemory: *maxMemory, Rate: *perSecond,
+	})
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
+		return ExitConfig
+	}
+	// The first line is the contract with whoever started the relay: it reads the endpoint
+	// from it, then configures the vendor CLI.
+	if *format == "json" {
+		_ = json.NewEncoder(stdout).Encode(relayReady{Endpoint: r.Endpoint(), PID: os.Getpid()})
+	} else {
+		_, _ = fmt.Fprintln(stdout, r.Endpoint())
+	}
+	err = r.Serve(ctx)
+	s := r.Stats()
+	_, _ = fmt.Fprintf(stderr, "ynr relay: %d accepted; refused %d too large, %d busy, %d rate limited, %d malformed; %d records dropped by the spool\n",
+		s.Accepted, s.TooLarge, s.Busy, s.Limited, s.Malformed, s.Spool.Dropped)
+	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
 		return ExitAdapter
 	}

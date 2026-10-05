@@ -7,7 +7,8 @@ and the build order in [ADR-009](docs/adr/009-walking-skeleton.md).
 
 **Status:** the walking skeleton's first slice is in progress. `ynr serve` (the slim build) reads
 the spool and ships to an OTLP/HTTP endpoint, such as a local Jaeger; the object store, dashboards
-and the full build follow in later slices.
+and the full build follow in later slices. `ynr relay` receives a vendor CLI's OTLP, such as
+Claude Code's, and writes it into a spool folder.
 
 ## Try it
 
@@ -46,6 +47,10 @@ git config --global url."https://x-access-token:${TOKEN}@github.com/eyelock/ynr"
 make check    # formatting, vet, lint, and tests with the race detector
 make build    # bin/ynr, plus linux builds for images
 ```
+
+`go.work` builds ynr against the spool exporter in this repository; `go.mod` requires its last
+release, which is what `go install github.com/eyelock/ynr/cmd/ynr@<version>` uses. After
+releasing a new `spoolexporter/v*`, raise that requirement.
 
 Work goes on feature branches into `develop` by pull request; `main` moves only by release
 (gitflow, as in ynh, ynm and ynf). The repository's own settings are Terraform in

@@ -1,0 +1,8 @@
+// A workspace, so ynr builds and tests against the spool exporter in this repository rather than
+// its last release. `go install ...@version` ignores it and uses the version go.mod requires.
+go 1.26.0
+
+use (
+	.
+	./spoolexporter
+)

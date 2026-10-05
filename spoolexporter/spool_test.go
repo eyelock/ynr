@@ -469,3 +469,21 @@ func TestWriter_NeverWritesThroughALink(t *testing.T) {
 		t.Error(err)
 	}
 }
+
+func TestWriter_WriteRequest(t *testing.T) {
+	dir := t.TempDir()
+	w := NewWriter(Options{Dir: dir, Service: "relay", InstanceID: "i"})
+	w.WriteRequest([]byte(`{"resourceSpans":[]}`+"\n"), 2)
+	w.WriteRequest([]byte(`{"resourceLogs":[]}`), 1)
+	w.Close()
+	lines := readLines(t, dir)
+	if len(lines) != 2 {
+		t.Fatalf("lines = %d, want 2, each request on its own line", len(lines))
+	}
+	if _, ok := lines[0]["resourceSpans"]; !ok {
+		t.Errorf("first line = %v", lines[0])
+	}
+	if st := w.Stats(); st != (Stats{}) {
+		t.Errorf("stats = %+v", st)
+	}
+}

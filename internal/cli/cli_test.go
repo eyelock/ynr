@@ -1,9 +1,14 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -85,5 +90,67 @@ func TestServeRefusesASpoolAlreadyServed(t *testing.T) {
 	code, _, errOut := run("serve", "--spool", root, "--upstream", "http://127.0.0.1:1")
 	if code != ExitAdapter || !strings.Contains(errOut, "already served") {
 		t.Fatalf("code %d stderr %q", code, errOut)
+	}
+}
+
+func TestRelayRefusals(t *testing.T) {
+	for name, args := range map[string][]string{
+		"no folder":   {"relay", "--spool", ""},
+		"public":      {"relay", "--spool", t.TempDir(), "--listen", "0.0.0.0:0"},
+		"bad rate":    {"relay", "--spool", t.TempDir(), "--rate", "0"},
+		"bad format":  {"relay", "--spool", t.TempDir(), "--format", "xml"},
+		"missing dir": {"relay", "--spool", filepath.Join(t.TempDir(), "nope")},
+	} {
+		t.Setenv("YNR_SPOOL", "")
+		var out, errb bytes.Buffer
+		if code := Run(context.Background(), args, &out, &errb); code == ExitOK {
+			t.Errorf("%s: exit 0", name)
+		}
+	}
+}
+
+// TestRelayPrintsItsEndpointThenWrites runs the command as ynh would: read the first line for
+// the endpoint, send to it, stop the relay, and find the records in the folder.
+func TestRelayPrintsItsEndpointThenWrites(t *testing.T) {
+	dir := t.TempDir()
+	ctx, cancel := context.WithCancel(context.Background())
+	pr, pw := io.Pipe()
+	var errb bytes.Buffer
+	code := make(chan int, 1)
+	go func() {
+		code <- Run(ctx, []string{"relay", "--spool", dir, "--format", "json"}, pw, &errb)
+		_ = pw.Close()
+	}()
+	var ready struct {
+		Endpoint string `json:"endpoint"`
+		PID      int    `json:"pid"`
+	}
+	line, err := bufio.NewReader(pr).ReadBytes('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, _ = io.Copy(io.Discard, pr) }()
+	if err := json.Unmarshal(line, &ready); err != nil || ready.PID == 0 || !strings.HasPrefix(ready.Endpoint, "http://127.0.0.1:") {
+		t.Fatalf("first line = %s (%v)", line, err)
+	}
+	body := `{"resourceLogs":[{"scopeLogs":[{"logRecords":[{"eventName":"claude_code.user_prompt"}]}]}]}`
+	resp, err := http.Post(ready.Endpoint+"/v1/logs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	cancel()
+	if c := <-code; c != ExitOK {
+		t.Fatalf("exit %d: %s", c, errb.String())
+	}
+	if !strings.Contains(errb.String(), "1 accepted") {
+		t.Errorf("summary = %q", errb.String())
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 || !strings.HasSuffix(entries[0].Name(), ".jsonl") || strings.HasSuffix(entries[0].Name(), ".open.jsonl") {
+		t.Fatalf("files = %v", entries)
 	}
 }

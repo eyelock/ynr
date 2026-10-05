@@ -11,8 +11,16 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/eyelock/ynr
     steps:
       - uses: actions/checkout@v4
+      # ynr requires a released spoolexporter from this private repository; the workflow's own
+      # token can read it.
+      - name: let go read this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: git config --global url."https://x-access-token:${GH_TOKEN}@github.com/eyelock/ynr".insteadOf "https://github.com/eyelock/ynr"
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false

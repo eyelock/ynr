@@ -1,6 +1,7 @@
 package spoolexporter
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -119,6 +120,19 @@ func fileNamePart(s, fallback string) string {
 // Stats reports what the Writer has dropped and failed so far.
 func (w *Writer) Stats() Stats {
 	return Stats{Dropped: w.dropped.Load(), Errors: w.errors.Load()}
+}
+
+// WriteRequest appends one OTLP export request that is already encoded as
+// OTLP JSON, holding records records (spans, log records or data points),
+// for a program that receives OTLP rather than producing it through the
+// SDK, such as a relay. Like the exporters, it never fails: what it cannot
+// write, it counts.
+func (w *Writer) WriteRequest(request []byte, records int) {
+	request = bytes.TrimRight(request, "\r\n")
+	line := make([]byte, len(request)+1)
+	copy(line, request)
+	line[len(request)] = '\n'
+	w.writeLine(line, records)
 }
 
 // writeLine appends line, which must end in a newline, holding records
