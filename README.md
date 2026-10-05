@@ -22,13 +22,17 @@ docker run --rm -d --name jaeger -p 16686:16686 -p 4318:4318 jaegertracing/jaege
 first start. Anything a tool writes into its `local/` folder as OTLP JSON lines then appears in
 Jaeger at http://localhost:16686.
 
-## The spool exporter
+## The spool exporters
 
-[`spoolexporter/`](spoolexporter) is a separate Go module, `github.com/eyelock/ynr/spoolexporter`,
-that other tools import to write the spool: OpenTelemetry's own OTLP exporters, with a transport
-that writes OTLP JSON lines into a folder instead of sending them. It depends on nothing else in
-ynr. It is released with tags `spoolexporter/vX.Y.Z`. While this repository is private, fetching
-it needs `GOPRIVATE=github.com/eyelock/ynr` and a token with read access:
+Other tools write the spool with one of two packages, each depending only on its language's
+OpenTelemetry SDK and on nothing else in ynr. ynr's tests read what both write.
+
+- **Go:** [`spoolexporter/`](spoolexporter), the module `github.com/eyelock/ynr/spoolexporter`,
+  released with tags `spoolexporter/vX.Y.Z`.
+- **npm:** [`spoolexporter/js/`](spoolexporter/js), the package `@eyelock/otel-spool-exporter`.
+
+While this repository is private, fetching the Go module needs `GOPRIVATE=github.com/eyelock/ynr`
+and a token with read access:
 
 ```bash
 git config --global url."https://x-access-token:${TOKEN}@github.com/eyelock/ynr".insteadOf "https://github.com/eyelock/ynr"

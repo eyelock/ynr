@@ -29,7 +29,8 @@ its exit checks pass, not when its parts exist. Findings go back into the ADRs t
 the next slice starts.
 
 **Slice 1: one trace through the chain, on a laptop.**
-- The Go spool exporter package.
+- The Go and npm spool exporter packages, each checked against ynr's receiver in ynr's CI, so
+  ynm can start writing to the spool before slice 4.
 - `ynr serve`, slim build: ynr's own spool receiver, the hostile-input rules, provenance and
   factory-attribute stamping, and export over OTLP to a local Jaeger, which is only a viewer for
   this slice.
@@ -74,7 +75,7 @@ the next slice starts.
   many collectors, a poll reads only keys after each collector's listing position.
 
 **Slice 4: the contract, enforced.**
-- The npm spool exporter; registry learning from configured binaries; `ynr conformance` with the
+- Registry learning from configured binaries; `ynr conformance` with the
   stub vendor; releases through `eyelock/homebrew-tap`; ynm's integration, including a hosted ynm
   under `services/ynm/`; the conformance check required in ynh, ynf and ynm; the full-chain check
   in ynf's factory image; the scheduled real-vendor job.
