@@ -39,13 +39,18 @@ Usage:
             --upstream <otlp-http-endpoint> [--poll 1s] [--max-line <bytes>] [--debug]
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
+            [--exit-on-stdin-eof]
 
 ynr relay prints its OTLP/HTTP endpoint as its first line of output, then runs until it is
-stopped (Ctrl-C or SIGTERM), flushing what it received into the folder.
+stopped (Ctrl-C, SIGTERM, or with --exit-on-stdin-eof its standard input closing), flushing what
+it received into the folder.
 
 Environment fallbacks: YNR_SPOOL_ROOT, YNR_COLLECTOR_ID, YNR_COLLECTOR_INSTANCE, YNR_UPSTREAM,
 and YNR_SPOOL for the relay's folder.
 `
+
+// stdin is the relay's standard input, replaced in tests.
+var stdin io.Reader = os.Stdin
 
 // Run runs one command and returns its exit code.
 func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -62,7 +67,7 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	case "serve":
 		return serve(ctx, args[1:], stderr)
 	case "relay":
-		return relayCmd(ctx, args[1:], stdout, stderr)
+		return relayCmd(ctx, args[1:], stdin, stdout, stderr)
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return ExitOK
@@ -223,7 +228,7 @@ type relayReady struct {
 	PID      int    `json:"pid"`
 }
 
-func relayCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flags("relay", stderr)
 	dir := fs.String("spool", os.Getenv("YNR_SPOOL"), "writer folder to write into, such as a run's folder (YNR_SPOOL)")
 	listen := fs.String("listen", relay.DefaultListen, "loopback address; port 0 picks a free port")
@@ -231,6 +236,7 @@ func relayCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	maxRequest := fs.Int64("max-request", relay.DefaultMaxRequest, "largest request accepted, in bytes after decompression")
 	maxMemory := fs.Int64("max-memory", relay.DefaultMaxMemory, "most bytes of requests held at once")
 	perSecond := fs.Float64("rate", relay.DefaultRate, "requests accepted a second, sustained")
+	stdinEOF := fs.Bool("exit-on-stdin-eof", false, "also stop when standard input closes, so the relay ends with the process that started it")
 	if err := fs.Parse(args); err != nil {
 		return ExitUsage
 	}
@@ -258,6 +264,17 @@ func relayCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		_ = json.NewEncoder(stdout).Encode(relayReady{Endpoint: r.Endpoint(), PID: os.Getpid()})
 	} else {
 		_, _ = fmt.Fprintln(stdout, r.Endpoint())
+	}
+	if *stdinEOF {
+		// Whoever started the relay holds the other end of stdin; when it exits, even by
+		// SIGKILL, the pipe closes and the relay drains and stops as on SIGTERM.
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		go func() {
+			_, _ = io.Copy(io.Discard, stdin)
+			cancel()
+		}()
 	}
 	err = r.Serve(ctx)
 	s := r.Stats()

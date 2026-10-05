@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -258,5 +259,21 @@ func TestNew_Refuses(t *testing.T) {
 		if _, err := New(cfg); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// TestRelay_IdleConnectionDoesNotHoldShutdown: a connection opened but never used must not make
+// a stop look like a loss.
+func TestRelay_IdleConnectionDoesNotHoldShutdown(t *testing.T) {
+	r, stop := start(t, Config{Drain: 200 * time.Millisecond})
+	conn, err := net.Dial("tcp", strings.TrimPrefix(r.Endpoint(), "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	start := time.Now()
+	stop() // reports an error through t.Errorf if Serve returns one
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("stop took %v", d)
 	}
 }

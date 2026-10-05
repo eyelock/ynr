@@ -48,8 +48,8 @@ the next slice starts.
     counted, never read, shipped or deleted
   - an over-long or malformed line is skipped and counted
   - a repository settings file cannot turn Claude Code's prompt logging on
-  - an MCP server the agent starts over stdio, such as ynm, inherits the relay endpoint and its
-    records land in the run's folder with `run` provenance
+  - an MCP server the agent starts over stdio, such as ynm, writes to the run's folder through
+    `YNR_SPOOL` and its records arrive with `run` provenance
   - on a hosted runner without per-run quotas, a run that fills the spool's own filesystem does
     not stall ynf
   - Codex's behaviour is recorded in ADR-004
