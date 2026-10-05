@@ -61,9 +61,12 @@ open question. ynr stamps `ynr.provenance` from the folder, overwriting anything
   give which guarantee.
 - **`ynr serve` is the backstop.** It stops reading a run folder that exceeds its budget and
   records a provenance warning.
-- **`ynr serve` reads regular files only,** opens them without following links, and checks each
-  file's owner and device, so a planted link to `manifests/`, `factory/` or a host file is
-  ignored and counted, never read, shipped or deleted.
+- **`ynr serve` reads regular files only,** opens them without following links, refuses any
+  file with more than one link, and checks each file's owner and device, so a planted link to
+  `manifests/`, `factory/` or a host file is ignored and counted, never read, shipped or
+  deleted. A file must be owned by its folder's owner or, in a run's folder, by the user the
+  run's manifest names, since a run in an image writes as the image's user. It must be on the
+  same device as its own folder, so a run's folder may be a size-limited volume of its own.
 - **Lines are bounded** in length, and a malformed line is skipped and counted.
 
 A hosted server's spans join a factory's trace through W3C headers, but they are shipped by a
@@ -72,8 +75,9 @@ dashboard.
 
 **Factory attributes come from ynf's run manifest.** For each run, ynf writes a manifest to
 `manifests/<run id>.json`, a folder the run cannot reach, naming the run's lane id, harness, focus,
-item and step. ynr stamps those attributes on everything from that run's folder, overwriting what
-the sender set. A run cannot claim to belong to another factory.
+item and step, and the user the run writes as when that is not the folder's owner. ynr stamps those
+attributes on everything from that run's folder, overwriting what the sender set. A run cannot claim
+to belong to another factory.
 
 **Central trusts collectors, not stamps.** A collector is a runner pool or a host, never a single
 job: a GitHub Actions runner group, a worker pool, a hosted server's host, one developer's laptop.

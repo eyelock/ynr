@@ -18,16 +18,19 @@ tool.
 **Every participating tool:**
 
 1. **Sets up once, at process start,** with its language's official OpenTelemetry SDK and the
-   public spool exporter package for its language (ADR-004), choosing where to write in ADR-004's
+   spool exporter package for its language (ADR-004), choosing where to write in ADR-004's
    order: the operator's `OTEL_EXPORTER_OTLP_*`, then the spool, then the no-op providers.
 2. **Describes itself** with `service.name`, `service.version` and `service.instance.id`, and
    honours the standard `OTEL_RESOURCE_ATTRIBUTES`.
 3. **Joins the trace it was given.** A process reads `TRACEPARENT` and `TRACESTATE` from its
    environment; a server reads W3C trace context from request headers, MCP included. With none,
    it starts a trace.
-4. **Passes the trace on.** Every process it spawns gets `TRACEPARENT`, and every HTTP call
-   carries the headers. A process it spawns inherits its spool folder, unless the tool is the one
-   giving that process a folder of its own (ynf for runs, ADR-004).
+4. **Passes the trace on, within the factory.** Every process it spawns gets `TRACEPARENT`, and
+   every call to another of our tools (ynh, ynm, ynf, ynr) carries the W3C headers. Calls to
+   third parties, such as a model API, an identity provider, a forge or a tracker, carry none:
+   they never report to ynr, so the headers would only let an outside service correlate our
+   requests. A process it spawns inherits its spool folder, unless the tool is the one giving
+   that process a folder of its own (ynf for runs, ADR-004).
 5. **Announces each unit of work** with a `started` event when it begins (ADR-002).
 6. **Spans its boundaries, not its functions:** one span per unit of the tool's own work, and a
    child span per call out to another system (git, a forge, a tracker, ynm, a store, a model).

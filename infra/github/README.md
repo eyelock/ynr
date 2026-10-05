@@ -8,11 +8,25 @@ and set up again from nothing.
 | `repository.tf` | The repository: description, topics, visibility, features, merge options |
 | `branches.tf` | Gitflow: `develop` as the default branch, and protection on `main` and `develop`: a pull request required with `check` green (plus "Verify PR source branch" into `main`, so it takes only `develop`, `release/*` and `hotfix/*`), admins included, no force-push or delete |
 | `labels.tf` | Issue and PR labels, authoritatively: a label not listed is removed |
-| `actions.tf` | Actions permissions and the read-only default `GITHUB_TOKEN` |
+| `actions.tf` | Actions permissions, the read-only default `GITHUB_TOKEN`, and that the `RELEASE_TOKEN` secret exists |
 | `security.tf` | Dependabot alerts and security updates |
 | `imports.tf` | Import blocks that adopt the live repository into a fresh state |
 
 Not managed here: anything committed to the repository (`.github/`).
+
+## The release token
+
+The release workflow publishes the GitHub release and pushes the formula to
+`eyelock/homebrew-tap` with `RELEASE_TOKEN`, a fine-grained token limited to those two
+repositories with **Contents: Read and write**. GitHub never returns its value, so Terraform only
+tracks that the secret exists. Set or rotate it with gh, so the value never passes through
+Terraform:
+
+```bash
+gh secret set RELEASE_TOKEN -R eyelock/ynr
+```
+
+`imports.tf` adopts it into state on the next apply.
 
 ## Use
 

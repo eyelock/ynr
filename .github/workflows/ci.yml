@@ -11,15 +11,32 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
+    env:
+      GOPRIVATE: github.com/eyelock/ynr
     steps:
       - uses: actions/checkout@v4
+      # ynr requires a released spoolexporter from this private repository; the workflow's own
+      # token can read it.
+      - name: let go read this repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: git config --global url."https://x-access-token:${GH_TOKEN}@github.com/eyelock/ynr".insteadOf "https://github.com/eyelock/ynr"
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
-      # Go arrives with the walking skeleton's first slice; until then there is nothing to set up.
       - uses: actions/setup-go@v5
-        if: hashFiles('go.mod') != ''
         with:
           go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: spoolexporter/js/package-lock.json
+      - uses: golangci/golangci-lint-action@v8
+        with:
+          version: v2.14.0
+          install-only: true
       - name: make check
         run: make check
+      - name: build
+        run: make build && ./bin/ynr version

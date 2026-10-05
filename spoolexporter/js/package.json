@@ -1,0 +1,62 @@
+{
+  "name": "@eyelock/otel-spool-exporter",
+  "version": "0.1.0",
+  "description": "OpenTelemetry exporters that write traces, metrics and logs as OTLP JSON lines into a spool folder",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eyelock/ynr.git",
+    "directory": "spoolexporter/js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "@opentelemetry/core": "^2.11.0",
+    "@opentelemetry/otlp-transformer": "^0.222.0"
+  },
+  "peerDependencies": {
+    "@opentelemetry/sdk-logs": ">=0.222.0 <1",
+    "@opentelemetry/sdk-metrics": "^2.11.0",
+    "@opentelemetry/sdk-trace": "^2.11.0"
+  },
+  "peerDependenciesMeta": {
+    "@opentelemetry/sdk-logs": {
+      "optional": true
+    },
+    "@opentelemetry/sdk-metrics": {
+      "optional": true
+    },
+    "@opentelemetry/sdk-trace": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/api-logs": "^0.222.0",
+    "@opentelemetry/resources": "^2.11.0",
+    "@opentelemetry/sdk-logs": "^0.222.0",
+    "@opentelemetry/sdk-metrics": "^2.11.0",
+    "@opentelemetry/sdk-trace": "^2.11.0",
+    "@types/node": "^24.0.0",
+    "typescript": "^7.0.2"
+  }
+}

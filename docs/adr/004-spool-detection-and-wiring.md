@@ -31,11 +31,14 @@ It is the only contract between a tool and ynr.
   job). If the object store is unreachable for long enough to reach the cap, it evicts the oldest
   closed files first, counting what it drops (`ynr.spool.evicted`), so an outage can never grow
   the spool without limit.
-- **The spool exporter is shared, public and generic.** The Go and JavaScript SDKs do not ship an
-  OTLP file exporter, and writing the spool correctly is subtle, so it is published once as a Go
-  module and an npm package in their own public repository (`eyelock/otel-spool-exporter`,
-  default, 2026-10-05). They are ordinary OpenTelemetry exporters that know nothing of ynr; that
-  repository owns the spool format, and every tool uses them (NFR-8).
+- **The spool exporter is shared and generic.** The Go and JavaScript SDKs do not ship an OTLP
+  file exporter, and writing the spool correctly is subtle, so it is written once, beside the
+  receiver that reads it: a Go module (`github.com/eyelock/ynr/spoolexporter`, released with tags
+  `spoolexporter/v*`) and an npm package (`@eyelock/otel-spool-exporter`), both in the
+  `spoolexporter/` folder of ynr's repository. Each has its own module, depends only on its
+  language's OpenTelemetry SDK, with no network exporter or gRPC, and nothing else in ynr; they
+  are ordinary OpenTelemetry exporters that know nothing of ynr's roles. The
+  spool format and both ends of it live in one repository, and every tool uses them (NFR-8).
 
 **Reading.** `ynr serve` reads every writer folder with ynr's own spool receiver, including open
 files up to their last complete line, under the hostile-input rules in ADR-003. It ships what it
@@ -56,6 +59,14 @@ into ynf's run capture (below).
 
 A long-lived process that found no spool checks again once a minute, so a ynm server started
 before ynr still finds the spool once it exists.
+
+**`ynr serve`'s own settings** are flags with environment fallbacks (NFR-7): the spool root
+(`--spool`, `YNR_SPOOL_ROOT`), the collector's identity (`--collector-id`, `YNR_COLLECTOR_ID`,
+defaulting on a laptop to `local-<host>`), the job within its pool (`--collector-instance`,
+`YNR_COLLECTOR_INSTANCE`) the object store it ships to (`--store`, `YNR_STORE`, defaulting on a
+laptop to the folder `$XDG_DATA_HOME/ynr/store`), and an optional OTLP endpoint it also forwards to
+(`--upstream`, `YNR_UPSTREAM`). With a store, the store is what commits the spool, and the upstream
+is a best-effort copy that never holds the spool back; without one, the upstream commits it.
 
 **Detection decides where to write; configuration decides what runs** (NFR-11). No tool starts
 `ynr` because it found it. On a laptop, the person runs `ynr serve`, which creates the spool on
@@ -107,21 +118,29 @@ otherwise its children inherit the environment unchanged.
 
 **The relay** is for vendor CLIs, which export only over the network. `ynr relay --spool <folder>`
 listens on a random loopback port, so parallel runs on one host never collide, writes what it
-receives into that folder, and enforces a memory limit, a request size limit and a rate limit,
-since the agent can reach it. When the relay setting is on and `ynr` is present, `ynh agent run`
-starts it for the length of the run, configures the vendor CLI, and stops it after the vendor exits
-and the relay has flushed:
+receives into that folder, and enforces a memory limit, a request size limit and a rate limit, since
+the agent can reach it. It accepts OTLP/HTTP, protobuf or JSON, optionally gzipped, and prints its
+endpoint as its first line of output (`--format json` adds its pid), which is how whoever started it
+learns where to point the vendor. With `--exit-on-stdin-eof` it also stops when its standard input
+closes, so it ends with the process that started it even if that process is killed outright. When
+the relay setting is on and `ynr` is present, `ynh agent run` starts it for the length of the run,
+configures the vendor CLI, and stops it after the vendor exits and the relay has flushed:
 
 | Vendor | Configured with |
 |---|---|
-| Claude Code | `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER` and `OTEL_LOGS_EXPORTER` set to `otlp`, `OTEL_EXPORTER_OTLP_ENDPOINT` set to the relay, `TRACEPARENT`; traces are beta and reported to need `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`. Prompt logging is never turned on. |
+| Claude Code | `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER` and `OTEL_LOGS_EXPORTER` set to `otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, `OTEL_EXPORTER_OTLP_ENDPOINT` set to the relay, `TRACEPARENT`, and `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, without which it sends no spans. Verified with Claude Code 2.1.289: its `claude_code.interaction` span joins `TRACEPARENT`, and with prompt logging off a prompt's text arrives as `<REDACTED>`. Prompt logging is never turned on. |
 | Codex | an `[otel]` block in a run-local copy of its `config.toml`, with the full signal path in the endpoint, since Codex is not configured through the environment. Whether it reads `TRACEPARENT` is unverified. |
 
-**The relay's settings reach the agent's own subprocesses.** The vendor CLI passes its
-environment on, so anything the agent starts that follows the order above, such as ynm launched
-as an MCP server over stdio, sees `OTEL_EXPORTER_OTLP_ENDPOINT` and exports to the relay instead
-of writing to the spool. That is expected: its records still land in the run's folder with `run`
-provenance, but without the spool's crash safety.
+**The relay's settings stay with the vendor.** Claude Code does not pass its `OTEL_*` settings to
+the processes it starts, so an MCP server the agent launches over stdio, such as ynm, does not see
+the relay. It finds `YNR_SPOOL`, which ynh passes to the run, and writes to the run's folder itself,
+with `run` provenance and the spool's crash safety.
+
+**A vendor propagates the trace by its own rules.** With tracing on, Claude Code sends `traceparent`
+to its own API and to HTTP MCP servers, and has no setting to stop it. ADR-006's rule that our tools
+send trace context only within the factory binds our tools, not a vendor's; we accept this, because
+withholding `TRACEPARENT` from the vendor would break the trace from a step into the agent. The
+headers carry trace and span ids only, never content.
 
 The vendor settings in the table above are verified in the walking skeleton before anything else
 relies on them (ADR-009), including whether a repository's own Claude Code settings file can
@@ -143,6 +162,8 @@ turns nothing on.
 
 ## Alternatives
 
+- **A separate public repository for the exporters.** Not chosen: the format would live apart
+  from the receiver that reads it, and a change to it would span two repositories.
 - **Export over the network to a local collector.** Not chosen as the local path: data in memory
   is lost when a process dies, docker-mode runs cannot reach the job's loopback, and each endpoint
   needs an egress exception. Kept only for vendor CLIs, through the relay, and for operators who
@@ -155,7 +176,11 @@ turns nothing on.
 
 ## Consequences
 
-- Each sibling depends on the OpenTelemetry SDK and the public spool exporter for its language.
+- Each sibling depends on the OpenTelemetry SDK and the spool exporter for its language.
+- While ynr's repository is private, fetching the Go module needs a read-only token
+  (`GOPRIVATE=github.com/eyelock/ynr`), in CI and for anyone building a sibling from source. For a
+  public tool such as ynh, that means building from source outside its maintainers' machines and
+  CI waits until ynr is made public; its released binaries are unaffected.
 - A run that is killed leaves its started events and every batch already written.
 
 ## Open questions
