@@ -46,6 +46,9 @@ type Manifest struct {
 	Focus   string `json:"focus"`
 	Item    string `json:"item"`
 	Step    string `json:"step"`
+	// UID is the user the run writes as, when that is not the run folder's owner: a run in an
+	// image writes as the image's user. ynr then accepts the run's files from that user too.
+	UID *uint32 `json:"uid,omitempty"`
 }
 
 // ParseManifest parses a manifest and checks it names the run whose folder it is for.

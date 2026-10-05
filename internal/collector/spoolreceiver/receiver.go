@@ -95,6 +95,7 @@ func (r *spoolReceiver) Start(_ context.Context, _ component.Host) error {
 			r.startErr = err
 			return
 		}
+		reader.RunUser = r.runUser
 		r.reader = reader
 		ctx, cancel := context.WithCancel(context.Background())
 		r.cancel, r.done = cancel, make(chan struct{})
@@ -216,6 +217,14 @@ func (r *spoolReceiver) handle(ctx context.Context, w spool.Writer, line []byte)
 		return spool.ErrMalformed
 	}
 	return err
+}
+
+// runUser is the run's user from its manifest, for the reader's ownership check.
+func (r *spoolReceiver) runUser(w spool.Writer) (uint32, bool) {
+	if mr := r.manifest(w); mr.m != nil && mr.m.UID != nil {
+		return *mr.m.UID, true
+	}
+	return 0, false
 }
 
 // manifest returns the run's manifest, read once per poll.
