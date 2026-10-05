@@ -1,0 +1,41 @@
+name: publish-spoolexporter
+# Publishes the npm spool exporter to GitHub Packages when a spoolexporter/v* tag is pushed; the
+# same tag versions the Go module. Run by hand to publish a tag pushed before this workflow existed.
+on:
+  push:
+    tags: ["spoolexporter/v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish, such as spoolexporter/v0.1.0"
+        required: true
+permissions:
+  contents: read
+  packages: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://npm.pkg.github.com
+          scope: "@eyelock"
+      - name: version from tag
+        working-directory: spoolexporter/js
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          case "$TAG" in spoolexporter/v*) ;; *) echo "not a spoolexporter tag: $TAG"; exit 1 ;; esac
+          npm version --no-git-tag-version --allow-same-version "${TAG#spoolexporter/v}"
+      - name: test
+        working-directory: spoolexporter/js
+        run: npm ci --no-audit --no-fund && npm run typecheck && npm test
+      - name: publish
+        working-directory: spoolexporter/js
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm publish
