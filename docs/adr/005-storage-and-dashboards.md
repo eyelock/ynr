@@ -57,7 +57,7 @@ one hour's prefix rather than every collector's:
 <root>/<signal>/<yyyy>/<mm>/<dd>/<hh>/<collector id>/<ship ulid>_<source>-<from>-<to>.jsonl.gz
 <root>/compacted/<signal>/<yyyy>/<mm>/<dd>/<hh>/part-<n>.parquet           compacted
 <root>/compacted/<signal>/<yyyy>/<mm>/<dd>/<hh>/_manifest-<n>.json
-<root>/rollups/metrics/<daily|monthly>/<period>.parquet                    metric rollups
+<root>/rollups/<metrics|runs>/<daily|monthly>/<period>.parquet             rollups
 <root>/index/items/<yyyy>/<mm>/<dd>.parquet                               item index, daily
 <root>/registries/<collector id>/<tool>/<version>/<sha256>.json           ADR-007
 ```
@@ -114,9 +114,12 @@ so the reader's hot tier holds all of it, rebuilt on restart from one index file
 "What happened to this ticket" asks the hot tier which hours and traces are involved, then reads
 only those hours, never a scan of the whole retention window.
 
-**Metric rollups.** Compaction also writes daily and monthly aggregates of every metric, by its
-attributes. Long-range views, such as cost by model this year, read the rollups. Hourly metric
-detail is kept for 30 days and the rollups for 13 months (NFR-15).
+**Rollups.** Compaction also writes daily and monthly aggregates of every metric, by its
+attributes, and of every run, from its run span (`ynh.run`), by lane, model, outcome, harness and
+repository: the runners report a run's cost and tokens on its span. A day is rolled up by the
+hours it was received in, so a record is counted on exactly one day. Long-range views, such as
+cost by model this year, read the rollups in whole days and months. Hourly metric detail is kept
+for 30 days and the rollups for 13 months (NFR-15).
 
 **Retention** is per signal (NFR-15): lifecycle rules on each signal's prefixes for S3, and
 deletion by age and total size for a folder.

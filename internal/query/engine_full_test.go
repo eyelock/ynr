@@ -123,7 +123,7 @@ func run(t *testing.T, r store.Reader, name string, p Params) *Result {
 		p.Until = now.Add(time.Minute)
 	}
 	if p.Since.IsZero() {
-		p.Since = now.Add(-q.Since)
+		p.Since = p.Until.Add(-q.Since)
 	}
 	res, err := Run(context.Background(), r, q, p)
 	if err != nil {
