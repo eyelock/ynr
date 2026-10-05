@@ -10,6 +10,13 @@ the spool and ships to an OTLP/HTTP endpoint, such as a local Jaeger; the object
 and the full build follow in later slices. `ynr relay` receives a vendor CLI's OTLP, such as
 Claude Code's, and writes it into a spool folder.
 
+## Install
+
+```bash
+export HOMEBREW_GITHUB_API_TOKEN=<a token that can read eyelock/ynr>   # while ynr is private
+brew install eyelock/tap/ynr
+```
+
 ## Try it
 
 ```bash
