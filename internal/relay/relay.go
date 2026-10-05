@@ -70,6 +70,7 @@ type Relay struct {
 	srv      *http.Server
 	limiter  *rate.Limiter
 	inflight atomic.Int64
+	active   atomic.Int64 // requests being handled now
 
 	accepted, tooLarge, busy, limited, malformed atomic.Int64
 }
@@ -178,10 +179,18 @@ func (r *Relay) Serve(ctx context.Context) error {
 	sctx, cancel := context.WithTimeout(context.Background(), r.cfg.Drain)
 	defer cancel()
 	err := r.srv.Shutdown(sctx)
-	r.w.Close()
 	if errors.Is(err, context.DeadlineExceeded) {
-		return fmt.Errorf("relay: requests still in flight after %s", r.cfg.Drain)
+		// Shutdown also waits for connections that were opened but never sent a request. Close
+		// them; it is only a loss if a request was actually being handled.
+		busy := r.active.Load()
+		_ = r.srv.Close()
+		r.w.Close()
+		if busy > 0 {
+			return fmt.Errorf("relay: %d requests still in flight after %s", busy, r.cfg.Drain)
+		}
+		return nil
 	}
+	r.w.Close()
 	return err
 }
 
@@ -224,6 +233,8 @@ func unmarshal(fromJSON, fromProto func([]byte) error, b []byte, js bool) error 
 
 func (r *Relay) handle(decode decoder) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
+		r.active.Add(1)
+		defer r.active.Add(-1)
 		if req.Method != http.MethodPost {
 			w.Header().Set("Allow", http.MethodPost)
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
