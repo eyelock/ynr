@@ -29,7 +29,9 @@ OpenTelemetry SDK and on nothing else in ynr. ynr's tests read what both write.
 
 - **Go:** [`spoolexporter/`](spoolexporter), the module `github.com/eyelock/ynr/spoolexporter`,
   released with tags `spoolexporter/vX.Y.Z`.
-- **npm:** [`spoolexporter/js/`](spoolexporter/js), the package `@eyelock/otel-spool-exporter`.
+- **npm:** [`spoolexporter/js/`](spoolexporter/js), the package `@eyelock/otel-spool-exporter`,
+  published to GitHub Packages by the same tags. Installing it needs an `.npmrc` with
+  `@eyelock:registry=https://npm.pkg.github.com` and a token that can read packages.
 
 While this repository is private, fetching the Go module needs `GOPRIVATE=github.com/eyelock/ynr`
 and a token with read access:
