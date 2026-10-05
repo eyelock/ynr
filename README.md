@@ -7,7 +7,8 @@ and the build order in [ADR-009](docs/adr/009-walking-skeleton.md).
 
 **Status:** the walking skeleton's first slice is in progress. `ynr serve` (the slim build) reads
 the spool and ships to an OTLP/HTTP endpoint, such as a local Jaeger; the object store, dashboards
-and the full build follow in later slices.
+and the full build follow in later slices. `ynr relay` receives a vendor CLI's OTLP, such as
+Claude Code's, and writes it into a spool folder.
 
 ## Try it
 
