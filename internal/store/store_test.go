@@ -98,3 +98,37 @@ func TestNewULID(t *testing.T) {
 		t.Error("two ULIDs in the same millisecond are equal")
 	}
 }
+
+func TestFolderListsWhatWasPut(t *testing.T) {
+	dir := t.TempDir()
+	r, err := OpenReader(FolderURL(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	for _, k := range []string{"traces/2026/10/05/21/laptop/b.jsonl.gz", "traces/2026/10/05/20/laptop/a.jsonl.gz", "logs/x.jsonl.gz"} {
+		if err := r.Put(ctx, k, []byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "traces", "2026", "10", "05", "21", "laptop", ".put-123"), nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	keys, err := r.List(ctx, "traces/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "traces/2026/10/05/20/laptop/a.jsonl.gz traces/2026/10/05/21/laptop/b.jsonl.gz"
+	if strings.Join(keys, " ") != want {
+		t.Fatalf("keys = %v", keys)
+	}
+	if keys, err := r.List(ctx, "metrics/2026/"); err != nil || len(keys) != 0 {
+		t.Fatalf("an empty prefix = %v, %v", keys, err)
+	}
+	if _, err := r.List(ctx, "../"); err == nil {
+		t.Fatal("listed outside the store")
+	}
+	if got := r.Location("logs/x.jsonl.gz"); got != filepath.Join(dir, "logs", "x.jsonl.gz") {
+		t.Fatalf("location = %s", got)
+	}
+}

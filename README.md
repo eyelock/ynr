@@ -8,8 +8,8 @@ and the build order in [ADR-009](docs/adr/009-walking-skeleton.md).
 **Status:** the walking skeleton's first slice is done and the second has begun. `ynr serve`
 (the slim build) reads the spool and ships stamped batches to a store, by default a folder on this
 machine, and can also forward to an OTLP/HTTP endpoint such as a local Jaeger. `ynr relay` receives
-a vendor CLI's OTLP, such as Claude Code's, into a spool folder. The full build, with queries and
-the dashboard, follows.
+a vendor CLI's OTLP, such as Claude Code's, into a spool folder. The full build adds `ynr query`,
+the named queries over the store, with DuckDB; the hot tier, compaction and the dashboard follow.
 
 ## Install
 
@@ -30,6 +30,17 @@ docker run --rm -d --name jaeger -p 16686:16686 -p 4318:4318 jaegertracing/jaege
 `ynr serve` creates the spool at `$XDG_STATE_HOME/ynr/spool` (or `~/.local/state/ynr/spool`) on
 first start. Anything a tool writes into its `local/` folder as OTLP JSON lines then appears in
 Jaeger at http://localhost:16686.
+
+Ask the store what happened, with the full build (DuckDB, so cgo):
+
+```bash
+make full
+./bin/ynr-full query                                  # the named queries
+./bin/ynr-full query runs                             # runs by outcome for each lane, last day
+./bin/ynr-full query cost --since 7d --format json    # cost and tokens by model
+./bin/ynr-full query item github.com/eyelock/ynr#12   # one work item's history
+./bin/ynr-full query trace <trace id>                 # one trace as a tree
+```
 
 ## The spool exporters
 
@@ -52,8 +63,9 @@ git config --global url."https://x-access-token:${TOKEN}@github.com/eyelock/ynr"
 ## Develop
 
 ```bash
-make check    # formatting, vet, lint, and tests with the race detector
+make check    # formatting, vet, lint, and tests with the race detector, in both builds
 make build    # bin/ynr, plus linux builds for images
+make full     # bin/ynr-full, the full build with DuckDB
 ```
 
 `go.work` builds ynr against the spool exporter in this repository; `go.mod` requires its last

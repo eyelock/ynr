@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eyelock/ynr"
 	"github.com/eyelock/ynr/internal/spool"
 )
 
@@ -29,7 +30,7 @@ func TestUsageAndVersion(t *testing.T) {
 	if code, _, _ := run("nope"); code != ExitUsage {
 		t.Errorf("unknown command = %d", code)
 	}
-	if code, out, _ := run("version"); code != ExitOK || !strings.Contains(out, "slim") {
+	if code, out, _ := run("version"); code != ExitOK || !strings.Contains(out, ynr.Build) {
 		t.Errorf("version = %d %q", code, out)
 	}
 }
@@ -41,7 +42,7 @@ func TestInfoReportsTheServingProcess(t *testing.T) {
 	}
 	code, out, _ := run("info", "--spool", root, "--format", "json")
 	var rep infoReport
-	if code != ExitOK || json.Unmarshal([]byte(out), &rep) != nil || rep.Serving != nil || rep.Build != "slim" {
+	if code != ExitOK || json.Unmarshal([]byte(out), &rep) != nil || rep.Serving != nil || rep.Build != ynr.Build {
 		t.Fatalf("info = %d %s", code, out)
 	}
 	l, err := spool.Acquire(root)
