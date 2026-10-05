@@ -31,3 +31,9 @@ import {
   to = github_repository_dependabot_security_updates.ynr
   id = "ynr"
 }
+
+# Set by hand with gh, so the token never enters Terraform state; this adopts it.
+import {
+  to = github_actions_secret.release_token
+  id = "ynr:RELEASE_TOKEN"
+}
