@@ -17,7 +17,10 @@ import (
 )
 
 //go:embed macros.sql
-var macros string
+var baseMacros string
+
+// macroSQL is every macro the views and queries use, with the current erasure list.
+func macroSQL() string { return baseMacros + erasureSQL() }
 
 //go:embed batches.sql
 var batchViews string
@@ -113,7 +116,7 @@ func Run(ctx context.Context, r store.Reader, q *Query, p Params) (*Result, erro
 	defer func() { _ = db.Close() }()
 	// One connection, so the macros and views exist for the query that follows.
 	db.SetMaxOpenConns(1)
-	setup := macros + batchSQL(files.Batches) + combinedSQL(files.Parts)
+	setup := macroSQL() + batchSQL(files.Batches) + combinedSQL(files.Parts)
 	if _, err := db.ExecContext(ctx, setup); err != nil {
 		return nil, fmt.Errorf("query: preparing the views: %w", err)
 	}
@@ -145,11 +148,18 @@ func combinedSQL(parts map[string][]string) string {
 	for _, sig := range signals {
 		src := "SELECT * FROM batch_" + sig.table
 		if ps := parts[sig.name]; len(ps) > 0 {
-			src += " UNION ALL BY NAME SELECT * FROM " + parquet(ps)
+			src += " UNION ALL BY NAME " + maskedParquet(ps)
 		}
 		fmt.Fprintf(&b, "\nCREATE OR REPLACE VIEW %s AS SELECT * FROM (%s)\nQUALIFY row_number() OVER (PARTITION BY record_id ORDER BY file) = 1;\n", sig.table, src)
 	}
 	return b.String()
+}
+
+// maskedParquet reads compacted parts with erased handles masked: a part written before a handle
+// was erased still holds it until its hour is compacted again.
+func maskedParquet(files []string) string {
+	return "SELECT * REPLACE (mask_attrs(resource) AS resource, mask_attrs(attributes) AS attributes, " +
+		"CASE WHEN erased(actor) THEN '" + Erased + "' ELSE actor END AS actor) FROM " + parquet(files)
 }
 
 // parquet reads compacted parts.
@@ -225,4 +235,19 @@ func plain(v any) any {
 		return string(x)
 	}
 	return v
+}
+
+// erasureSQL defines erased(v), true for an erased handle, and mask_attrs(l), which replaces
+// an erased handle in a user.name attribute.
+func erasureSQL() string {
+	handles := Erasure()
+	quoted := make([]string, len(handles))
+	for i, h := range handles {
+		quoted[i] = "'" + strings.ReplaceAll(h, "'", "''") + "'"
+	}
+	return fmt.Sprintf(`
+CREATE OR REPLACE MACRO erased(v) AS list_contains([%s]::VARCHAR[], v);
+CREATE OR REPLACE MACRO mask_attrs(l) AS
+  list_transform(l, a -> CASE WHEN a.k = 'user.name' AND erased(a.v) THEN struct_pack(k := a.k, v := '%s') ELSE a END);
+`, strings.Join(quoted, ", "), Erased)
 }

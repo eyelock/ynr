@@ -33,7 +33,14 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 				errs = append(errs, err)
 				continue
 			}
-			if len(h.Batches) > 0 {
+			// An hour whose parts still hold an erased handle is compacted again, masked, and
+			// what held the handle is deleted at once rather than after Keep (ADR-005).
+			affected, err := holdsErased(ctx, r, h)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if len(h.Batches) > 0 || affected {
 				if err := compactHour(ctx, r, sig, t, h, now); err != nil {
 					errs = append(errs, fmt.Errorf("compacting %s %s: %w", sig.name, t.Format("2006-01-02T15"), err))
 					continue
@@ -50,7 +57,11 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 					continue
 				}
 			}
-			errs = append(errs, prune(ctx, r, h, c.Keep, now))
+			keep := c.Keep
+			if affected {
+				keep = 0
+			}
+			errs = append(errs, prune(ctx, r, h, keep, now))
 		}
 	}
 	// A day with compacted hours but no index, after a crash between the two, is indexed too.
@@ -156,7 +167,7 @@ func compactHour(ctx context.Context, r store.Reader, sig signal, hour time.Time
 	}
 	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1)
-	setup := macros + batchSQL(map[string][]string{sig.name: batches}) +
+	setup := macroSQL() + batchSQL(map[string][]string{sig.name: batches}) +
 		combinedSQL(map[string][]string{sig.name: parts})
 	if _, err := db.ExecContext(ctx, setup); err != nil {
 		return err
@@ -188,6 +199,30 @@ func compactHour(ctx context.Context, r store.Reader, sig signal, hour time.Time
 	}
 	// The manifest last: until it lands, readers read the batches, and the part is unused.
 	return r.Put(ctx, store.ManifestKey(sig.name, hour, n), append(b, '\n'))
+}
+
+// holdsErased reports whether an hour's compacted parts hold a handle on the erasure list.
+func holdsErased(ctx context.Context, r store.Reader, h *Hour) (bool, error) {
+	if h.Manifest == nil || len(Erasure()) == 0 {
+		return false, nil
+	}
+	var locs []string
+	for _, p := range h.Parts {
+		locs = append(locs, r.Location(p))
+	}
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = db.Close() }()
+	db.SetMaxOpenConns(1)
+	if _, err := db.ExecContext(ctx, macroSQL()); err != nil {
+		return false, err
+	}
+	var n int64
+	err = db.QueryRowContext(ctx, `SELECT count(*) FROM `+parquet(locs)+`
+WHERE erased(actor) OR len(list_filter(resource || attributes, a -> a.k = 'user.name' AND erased(a.v))) > 0`).Scan(&n)
+	return n > 0, err
 }
 
 // prune deletes, once the latest manifest is older than keep, the batches it covers and the

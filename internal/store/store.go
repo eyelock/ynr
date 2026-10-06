@@ -140,6 +140,8 @@ type Reader interface {
 	// Replace writes an object whole, replacing any already there: for what only the store's
 	// reader writes, such as the item index, never for batches.
 	Replace(ctx context.Context, key string, data []byte) error
+	// Sizes is List with each object's size in bytes, for retention by total size.
+	Sizes(ctx context.Context, prefix string) (map[string]int64, error)
 }
 
 // OpenReader opens a store for reading from its URL.
@@ -209,4 +211,24 @@ func (f *Folder) Delete(_ context.Context, key string) error {
 		return err
 	}
 	return nil
+}
+
+// Sizes lists the folder under prefix with each object's size.
+func (f *Folder) Sizes(ctx context.Context, prefix string) (map[string]int64, error) {
+	keys, err := f.List(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(keys))
+	for _, k := range keys {
+		fi, err := os.Lstat(f.Location(k))
+		if errors.Is(err, os.ErrNotExist) {
+			continue // removed since it was listed
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[k] = fi.Size()
+	}
+	return out, nil
 }
