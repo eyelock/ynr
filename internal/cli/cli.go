@@ -50,6 +50,8 @@ Usage:
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
             [--exit-on-stdin-eof]
   ynr telemetry registry [--format text|json]
+  ynr conformance [--file .ynr/conformance.yaml] [--format text|json] [--timeout 60s]
+            [--flush-limit 2s] [--keep]
   ynr tail [--spool <root>] [--service <name>] [--item <key>] [--from-start] [--format text|json]
   ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>]
             [--format text|json] [--socket <path>]]
@@ -64,6 +66,11 @@ rebuilt from the store, and leaves a bucket's retention to its lifecycle rules. 
 ynr relay prints its OTLP/HTTP endpoint as its first line of output, then runs until it is
 stopped (Ctrl-C, SIGTERM, or with --exit-on-stdin-eof its standard input closing), flushing what
 it received into the folder.
+
+ynr conformance runs the scenarios in a tool's conformance file against a temporary spool and a
+local test endpoint, and checks the instrumentation contract (ADR-006, ADR-008). It exits 1 if any
+check fails, and with --format json prints the full report. The stub vendor and the tool under
+test are found by bare name on the PATH.
 
 ynr tail follows what tools write to the spool as it is written, until Ctrl-C. It only watches:
 ynr serve still ships everything.
@@ -114,6 +121,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return queryCmd(ctx, args[1:], stdout, stderr)
 	case "telemetry":
 		return telemetryCmd(args[1:], stdout, stderr)
+	case "conformance":
+		return conformanceCmd(ctx, args[1:], stdout, stderr)
 	case "tail":
 		return tailCmd(ctx, args[1:], stdout, stderr)
 	case "doctor":
