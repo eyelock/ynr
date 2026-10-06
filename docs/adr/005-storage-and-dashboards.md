@@ -59,6 +59,7 @@ one hour's prefix rather than every collector's:
 <root>/compacted/<signal>/<yyyy>/<mm>/<dd>/<hh>/_manifest-<n>.json
 <root>/rollups/<metrics|runs>/<daily|monthly>/<period>.parquet             rollups
 <root>/index/items/<yyyy>/<mm>/<dd>.parquet                               item index, daily
+<root>/leases/compaction/<signal>/<yyyy>/<mm>/<dd>/<hh>.json                compaction leases
 <root>/registries/<collector id>/<tool>/<version>/<sha256>.json           ADR-007
 ```
 
@@ -70,7 +71,8 @@ end plus a slack (1 hour, default).
 a pattern such as `*/<collector>/*` would also match keys under `compacted/`, `index/` and other
 collectors' registries. Each collector's role therefore allows writes anchored per prefix
 (`traces/*/<id>/*`, `logs/*/<id>/*`, `metrics/*/<id>/*` and `registries/<id>/*`) and explicitly
-denies writes to `compacted/*`, `rollups/*` and `index/*`, which only central's role may write.
+denies writes to `compacted/*`, `rollups/*`, `index/*` and `leases/*`, which only central's role
+may write.
 Because a policy still cannot fix a key's depth, the reader accepts only keys of the exact shape
 above under every prefix it reads, batches, registries, compacted parts, rollups and the index
 alike: fixed depth, valid date and hour segments, a well-formed collector id. Anything else is
@@ -168,8 +170,8 @@ loopback. The central dashboard requires sign-in, implementing ynm ADR-017's OID
 **Infrastructure.** ynr ships Terraform per cloud adapter, starting with `infra/aws`: a bucket with
 public access blocked, encryption on and lifecycle rules per signal; one IAM role per collector,
 with writes anchored per prefix and explicit denies as above, and a noncurrent-version expiry rule
-if versioning is on; a central role that reads everything and writes only `compacted/`, `rollups/`
-and `index/`. It follows the shape of ynm's existing buckets.
+if versioning is on; a central role that reads everything and writes only `compacted/`, `rollups/`,
+`index/` and `leases/`, and deletes the batches compaction has covered. It follows the shape of ynm's existing buckets.
 
 ## Alternatives
 
