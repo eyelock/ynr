@@ -15,7 +15,8 @@ when no server is running. Compaction and the dashboard follow.
 ## Install
 
 ```bash
-export HOMEBREW_GITHUB_API_TOKEN=<a token that can read eyelock/ynr>   # while ynr is private
+# While ynr is private, Homebrew needs a token that can read eyelock/ynr: your gh login
+# (gh auth login) is enough, or export HOMEBREW_GITHUB_API_TOKEN=<token>.
 brew install eyelock/tap/ynr
 ```
 
