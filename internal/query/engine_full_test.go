@@ -330,3 +330,20 @@ func TestMetricPointsDedupe(t *testing.T) {
 		t.Fatalf("points = %s\nwant %s", got, want)
 	}
 }
+
+func TestRecentAndItems(t *testing.T) {
+	r := openStore(t)
+	run1 := runSpan(traceA, "1111111111111111", "github.com/eyelock/ynr#lint", "converged", "m", 1, now.Add(-2*time.Hour))
+	run1.res["ynf.item.key"] = "github.com/eyelock/ynr#12"
+	run2 := runSpan(traceB, "2222222222222222", "github.com/eyelock/ynr#lint", "budget", "m", 2, now.Add(-time.Hour))
+	run2.res["ynf.item.key"] = "github.com/eyelock/ynr#12"
+	ship(t, r, store.Traces, now.Add(-30*time.Minute), "local.a", traceLine(t, run1, run2))
+	res := run(t, r, "recent", Params{})
+	if len(res.Rows) != 2 || res.Rows[0][col(t, res, "trace_id")] != traceB {
+		t.Fatalf("recent = %v", rows(res))
+	}
+	res = run(t, r, "items", Params{})
+	if got := rows(res); len(got) != 1 || res.Rows[0][col(t, res, "last_outcome")] != "budget" || res.Rows[0][col(t, res, "traces")] != int64(2) {
+		t.Fatalf("items = %v", got)
+	}
+}
