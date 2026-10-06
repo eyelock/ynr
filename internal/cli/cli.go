@@ -43,10 +43,15 @@ Usage:
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
             [--exit-on-stdin-eof]
+  ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>]
+            [--format text|json]]
 
 ynr relay prints its OTLP/HTTP endpoint as its first line of output, then runs until it is
 stopped (Ctrl-C, SIGTERM, or with --exit-on-stdin-eof its standard input closing), flushing what
 it received into the folder.
+
+ynr query with no name lists the named queries. It reads the store directly and needs the full
+build, which includes DuckDB.
 
 ynr serve ships to a store, by default a folder on this machine, and optionally also forwards to
 an OTLP/HTTP endpoint. --store "" ships only to the upstream.
@@ -74,6 +79,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return serve(ctx, args[1:], stderr)
 	case "relay":
 		return relayCmd(ctx, args[1:], stdin, stdout, stderr)
+	case "query":
+		return queryCmd(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return ExitOK

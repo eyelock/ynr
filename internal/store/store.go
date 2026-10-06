@@ -112,3 +112,64 @@ func (f *Folder) Put(_ context.Context, key string, data []byte) (err error) {
 	}
 	return os.Rename(tmp.Name(), path)
 }
+
+// Reader lists a store's objects and says where DuckDB can read each one. Adapters provide only
+// this file access; the queries are the same over every adapter (ADR-005).
+type Reader interface {
+	Store
+	// List returns the keys under a prefix that ends in '/', in key order. A prefix with nothing
+	// under it is empty, not an error.
+	List(ctx context.Context, prefix string) ([]string, error)
+	// Location is where DuckDB reads a key: a path for a folder, a URL for a bucket.
+	Location(key string) string
+}
+
+// OpenReader opens a store for reading from its URL.
+func OpenReader(raw string) (Reader, error) {
+	s, err := Open(raw)
+	if err != nil {
+		return nil, err
+	}
+	r, ok := s.(Reader)
+	if !ok {
+		return nil, fmt.Errorf("store %q: this adapter cannot be read yet", raw)
+	}
+	return r, nil
+}
+
+// List walks the folder under prefix. Temporary files from a Put in progress are skipped.
+func (f *Folder) List(_ context.Context, prefix string) ([]string, error) {
+	if prefix != "" && (!strings.HasSuffix(prefix, "/") || !ValidKey(strings.TrimSuffix(prefix, "/"))) {
+		return nil, fmt.Errorf("store: invalid prefix %q", prefix)
+	}
+	base := filepath.Join(f.root, filepath.FromSlash(prefix))
+	var keys []string
+	err := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return filepath.SkipDir
+			}
+			return err
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(f.root, path)
+		if err != nil {
+			return err
+		}
+		if key := filepath.ToSlash(rel); ValidKey(key) && !strings.HasPrefix(d.Name(), ".") {
+			keys = append(keys, key)
+		}
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return keys, err
+}
+
+// Location is the object's path on this machine.
+func (f *Folder) Location(key string) string {
+	return filepath.Join(f.root, filepath.FromSlash(key))
+}
