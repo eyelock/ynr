@@ -1,0 +1,4 @@
+# Copy to example.s3.tfbackend (gitignored). terraform init -backend-config=example.s3.tfbackend
+bucket = "ynr-terraform-state.eyelock.net"
+key    = "aws/123456789012/store/main/terraform.tfstate"
+region = "us-east-1"
