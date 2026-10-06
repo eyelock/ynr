@@ -58,6 +58,25 @@ type Reader struct {
 	pos     *positions
 	pending map[string]time.Time // when each file's unshipped bytes were first seen
 	now     func() time.Time
+
+	// A follower (NewFollower) only watches: it keeps positions in memory, never deletes, and
+	// on its first poll starts at the end of each file unless fromStart.
+	follow, fromStart, primed bool
+}
+
+// NewFollower opens a spool root to watch, for ynr tail: the same hostile-input rules as the
+// reader that ships, but nothing is committed or deleted, so it never disturbs ynr serve. A
+// closed file that ynr serve deletes before the follower reaches its end is missed: a follower
+// is a live view, not a record.
+func NewFollower(root string, maxLine int, fromStart bool) (*Reader, error) {
+	if _, _, err := dirOwnerAndDev(root); err != nil {
+		return nil, err
+	}
+	if maxLine <= 0 {
+		maxLine = DefaultMaxLine
+	}
+	return &Reader{Root: root, MaxLine: maxLine, Counters: &Counters{}, pos: &positions{Files: map[string]int64{}},
+		pending: map[string]time.Time{}, now: time.Now, follow: true, fromStart: fromStart}, nil
 }
 
 // Init creates a spool root with its state folder and the laptop's local writer folder.
@@ -97,6 +116,7 @@ func (r *Reader) Poll(ctx context.Context, h Handler) error {
 	}
 	seen := map[string]bool{}
 	defer func() {
+		r.primed = true
 		r.pos.prune(seen)
 		for k := range r.pending {
 			if !seen[k] {
@@ -180,7 +200,10 @@ func (r *Reader) pollFile(w Writer, path string, owners []uint32, dev uint64, h 
 	defer func() { _ = f.Close() }()
 	key := id.String()
 	seen[key] = true
-	offset := r.pos.Files[key]
+	offset, known := r.pos.Files[key]
+	if r.follow && !known && !r.primed && !r.fromStart {
+		offset = size // a follower starts at the end of what was there before it
+	}
 	if offset > size {
 		offset = 0 // replaced or truncated: start again
 	}
@@ -204,7 +227,7 @@ func (r *Reader) pollFile(w Writer, path string, owners []uint32, dev uint64, h 
 		r.Counters.Malformed.Add(1)
 		committed = size
 	}
-	if handErr == nil && closed && committed == size {
+	if handErr == nil && closed && committed == size && !r.follow {
 		delete(r.pos.Files, key)
 		delete(seen, key)
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {

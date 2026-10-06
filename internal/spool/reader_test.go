@@ -330,3 +330,41 @@ func TestShipWaitsUntilDue(t *testing.T) {
 		t.Fatal("the final flush did not read the waiting line")
 	}
 }
+
+// TestFollowerWatchesWithoutDisturbing: a follower starts at the end of what is there, sees new
+// lines and new files, and never commits or deletes, so the shipping reader still gets it all.
+func TestFollowerWatchesWithoutDisturbing(t *testing.T) {
+	root := setup(t)
+	open := filepath.Join(root, "local", "ynh-1-0001"+OpenSuffix)
+	writeFile(t, open, "old\n")
+	f, err := NewFollower(root, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := poll(t, f); len(g) != 0 {
+		t.Fatalf("a follower read what was there before it: %v", g)
+	}
+	appendFile(t, open, "new\n")
+	closed := filepath.Join(root, "local", "ynh-1-0002"+ClosedSuffix)
+	writeFile(t, closed, "fresh\n")
+	g := poll(t, f)
+	if len(g) != 2 || g[0].line != "new" || g[1].line != "fresh" {
+		t.Fatalf("follower = %v", g)
+	}
+	if _, err := os.Stat(closed); err != nil {
+		t.Fatal("a follower deleted a closed file")
+	}
+	if _, err := os.Stat(filepath.Join(root, StateDir, "positions.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("a follower saved positions")
+	}
+	if g := poll(t, newReader(t, root, 0)); len(g) != 3 {
+		t.Fatalf("the shipping reader then read %v, want all three lines", g)
+	}
+	from, err := NewFollower(root, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g := poll(t, from); len(g) != 2 || g[0].line != "old" { // the shipped closed file is gone
+		t.Fatalf("--from-start read %v", g)
+	}
+}
