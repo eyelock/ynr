@@ -130,3 +130,21 @@ func TestLiveTailStreamsRows(t *testing.T) {
 		t.Fatalf("event = %s", event)
 	}
 }
+
+// TestHostGuardIsConfigurable: the local dashboard keeps the loopback guard unless a caller
+// (central, behind sign-in) names the hosts it answers.
+func TestHostGuardIsConfigurable(t *testing.T) {
+	h := Handler(Config{Runner: answers, AllowHost: func(host string) bool { return host == "ynr.example.com" }})
+	if resp, _ := get(t, h, "/items", "ynr.example.com"); resp.StatusCode != 200 {
+		t.Errorf("the named host = %d", resp.StatusCode)
+	}
+	for _, host := range []string{"127.0.0.1:4319", "localhost", "evil.example"} {
+		if resp, _ := get(t, h, "/items", host); resp.StatusCode != http.StatusMisdirectedRequest {
+			t.Errorf("host %s = %d", host, resp.StatusCode)
+		}
+	}
+	// Without a signed-in user the local dashboard shows no sign-out.
+	if _, body := get(t, Handler(Config{Runner: answers}), "/items", "127.0.0.1"); strings.Contains(body, "Sign out") {
+		t.Error("the local dashboard offers a sign-out")
+	}
+}

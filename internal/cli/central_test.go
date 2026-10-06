@@ -8,7 +8,7 @@ import (
 	"github.com/eyelock/ynr/internal/store"
 )
 
-// TestCentralRefusals: central needs the full build, and --ui is refused until sign-in exists.
+// TestCentralRefusals: central needs the full build, and --ui is refused unless sign-in is fully set up.
 func TestCentralRefusals(t *testing.T) {
 	st := store.FolderURL(t.TempDir())
 	if ynr.Build != "full" {
@@ -18,12 +18,20 @@ func TestCentralRefusals(t *testing.T) {
 		}
 		return
 	}
+	t.Setenv("YNR_OIDC_CLIENT_SECRET", "from-the-environment")
+	t.Setenv("YNR_SESSION_SECRET", strings.Repeat("s", 40))
+	// The client secret is never a flag, so it cannot show in ps.
+	if code, _, errs := run("central", "--store", st, "--ui", "127.0.0.1:0", "--oidc-client-secret", "x"); code != ExitUsage || !strings.Contains(errs, "not defined") {
+		t.Errorf("a client secret flag = %d %q", code, errs)
+	}
 	for _, tc := range []struct {
 		name string
 		args []string
 		want string
 	}{
-		{"ui", []string{"--store", st, "--ui", "127.0.0.1:0"}, "sign-in not built yet"},
+		{"ui without sign-in", []string{"--store", st, "--ui", "127.0.0.1:0"}, "rather than serve central's data unauthenticated"},
+		{"ui without who may sign in", []string{"--store", st, "--ui", "127.0.0.1:0", "--oidc-issuer", "http://127.0.0.1:1",
+			"--oidc-client-id", "c", "--oidc-redirect-url", "https://ynr.example.com/auth/callback"}, "who may sign in"},
 		{"no store", []string{"--store", ""}, "no store"},
 		{"bad window", []string{"--store", st, "--hot-window", "0s"}, "must be positive"},
 		{"bad scheme", []string{"--store", "gs://bucket"}, "no adapter"},

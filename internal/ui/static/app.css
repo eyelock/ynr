@@ -64,3 +64,5 @@ tr.fresh { animation: fresh 1.5s ease-out; }
   .span { grid-template-columns: minmax(120px, 40%) 1fr 56px; padding: 3px 8px; }
   .card dl { grid-template-columns: repeat(2, 1fr); }
 }
+.signout { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.signout .who { color: var(--muted); font-size: 0.85em; }
