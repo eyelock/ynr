@@ -19,7 +19,8 @@ tool.
 
 1. **Sets up once, at process start,** with its language's official OpenTelemetry SDK and the
    spool exporter package for its language (ADR-004), choosing where to write in ADR-004's
-   order: the operator's `OTEL_EXPORTER_OTLP_*`, then the spool, then the no-op providers.
+   order: another collector only when the operator has set `OTEL_EXPORTER_OTLP_*` explicitly,
+   otherwise ynr's spool, otherwise the no-op providers.
 2. **Describes itself** with `service.name`, `service.version` and `service.instance.id`, and
    honours the standard `OTEL_RESOURCE_ATTRIBUTES`.
 3. **Joins the trace it was given.** A process reads `TRACEPARENT` and `TRACESTATE` from its
