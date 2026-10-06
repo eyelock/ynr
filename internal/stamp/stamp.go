@@ -9,16 +9,17 @@ import (
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 
+	"github.com/eyelock/ynr/internal/names"
 	"github.com/eyelock/ynr/internal/spool"
 )
 
 // Attributes ynr stamps. ynr.* are ynr's own (ADR-007); the ynf.* names belong to ynf, and ynr
 // applies them on ynf's behalf from its run manifest.
 const (
-	Provenance        = "ynr.provenance"
-	ProvenanceWarning = "ynr.provenance.warning"
-	CollectorID       = "ynr.collector.id"
-	CollectorInstance = "ynr.collector.instance"
+	Provenance        = names.AttrProvenance
+	ProvenanceWarning = names.AttrProvenanceWarning
+	CollectorID       = names.AttrCollectorID
+	CollectorInstance = names.AttrCollectorInstance
 
 	Lane        = "ynf.lane"
 	LaneHarness = "ynf.lane.harness"
@@ -62,8 +63,8 @@ func ParseManifest(b []byte, runID string) (*Manifest, bool) {
 
 // Warnings recorded in ynr.provenance.warning.
 const (
-	NoManifest  = "no-manifest"
-	BadManifest = "bad-manifest"
+	NoManifest  = names.ProvenanceWarningNoManifest
+	BadManifest = names.ProvenanceWarningBadManifest
 )
 
 // Resource stamps one resource's attributes. Every ynr.* attribute the sender set is removed

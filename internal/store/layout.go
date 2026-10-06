@@ -169,3 +169,28 @@ func Span(key string) (from, to time.Time, rollup, ok bool) {
 	}
 	return time.Time{}, time.Time{}, false, false
 }
+
+var registryPattern = regexp.MustCompile(`^registries/([a-z0-9][a-z0-9._-]{0,62})/([a-z0-9][a-z0-9_-]{0,31})/([A-Za-z0-9][A-Za-z0-9._~-]{0,63})/([0-9a-f]{64})\.json$`)
+
+// RegistryKey is where a collector keeps a registry it learned from a tool (ADR-007), named by
+// the tool, its version and the SHA-256 of the registry, so two different registries for one
+// tool and version sit side by side:
+//
+//	registries/<collector id>/<tool>/<version>/<sha256>.json
+func RegistryKey(collector, tool, version, sha256 string) string {
+	return fmt.Sprintf("registries/%s/%s/%s/%s.json", collector, tool, version, sha256)
+}
+
+// Registry is what a registry key says about its object.
+type Registry struct {
+	Collector, Tool, Version, SHA256 string
+}
+
+// ParseRegistry reads a registry key, accepting only the exact shape RegistryKey writes.
+func ParseRegistry(key string) (Registry, error) {
+	m := registryPattern.FindStringSubmatch(key)
+	if m == nil {
+		return Registry{}, errNotThisShape
+	}
+	return Registry{Collector: m[1], Tool: m[2], Version: m[3], SHA256: m[4]}, nil
+}

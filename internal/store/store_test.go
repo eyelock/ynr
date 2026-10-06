@@ -212,3 +212,23 @@ func TestReplaceOverwritesWhatPutRefuses(t *testing.T) {
 		t.Fatalf("got %q", b)
 	}
 }
+
+func TestRegistryKeys(t *testing.T) {
+	sum := strings.Repeat("ab", 32)
+	key := RegistryKey("gha-eyelock", "ynh", "1.2.3-rc.5", sum)
+	if key != "registries/gha-eyelock/ynh/1.2.3-rc.5/"+sum+".json" || !ValidKey(key) {
+		t.Fatalf("key %q", key)
+	}
+	r, err := ParseRegistry(key)
+	if err != nil || r != (Registry{Collector: "gha-eyelock", Tool: "ynh", Version: "1.2.3-rc.5", SHA256: sum}) {
+		t.Fatalf("%+v %v", r, err)
+	}
+	for _, bad := range []string{
+		"registries/a/ynh/1/" + sum + ".json/x", "registries/a/ynh/../" + sum + ".json", "registries/a/ynh/1/short.json",
+		"registries/A/ynh/1/" + sum + ".json", "registries/a/ynh/1/" + sum + ".txt", "traces/a/ynh/1/" + sum + ".json",
+	} {
+		if _, err := ParseRegistry(bad); err == nil {
+			t.Errorf("%q parsed", bad)
+		}
+	}
+}
