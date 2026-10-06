@@ -40,7 +40,7 @@ Usage:
   ynr info [--spool <root>] [--format text|json]
   ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>]
             [--collector-id <id>] [--collector-instance <id>] [--poll 1s]
-            [--max-line <bytes>] [--hot-window 168h] [--retain 168h] [--retain-bytes <bytes>]
+            [--max-line <bytes>] [--spool-cap <bytes>] [--hot-window 168h] [--retain 168h] [--retain-bytes <bytes>]
             [--erase <file>] [--ui 127.0.0.1:4319] [--debug]
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
@@ -215,6 +215,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	maxLine := fs.Int("max-line", spool.DefaultMaxLine, "longest line accepted, in bytes")
 	debug := fs.Bool("debug", false, "also print a summary of what is shipped")
 	hotWindow := fs.Duration("hot-window", 7*24*time.Hour, "how far back the hot tier holds records, for queries (full build only)")
+	spoolCap := fs.Int64("spool-cap", 1<<30, "the most the spool may hold, in bytes; over it the oldest closed files are evicted and counted")
 	retain := fs.Duration("retain", store.LaptopRetention.Records, "how long a folder store keeps records; rollups are kept 13 months")
 	retainBytes := fs.Int64("retain-bytes", store.LaptopRetention.MaxBytes, "the most a folder store's records may take, in bytes; the oldest go first (0: no cap)")
 	erase := fs.String("erase", env("YNR_ERASE", ""), "a file of handles to erase, one per line (YNR_ERASE)")
@@ -241,6 +242,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		return ExitConfig
 	case *hotWindow <= 0:
 		_, _ = fmt.Fprintln(stderr, "ynr: --hot-window must be positive")
+		return ExitConfig
+	case *spoolCap <= 0:
+		_, _ = fmt.Fprintln(stderr, "ynr: --spool-cap must be positive")
 		return ExitConfig
 	case *retain <= 0 || *retainBytes < 0:
 		_, _ = fmt.Fprintln(stderr, "ynr: --retain must be positive and --retain-bytes not negative")
@@ -297,6 +301,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		MaxLine:      *maxLine,
 		Identity:     stamp.Identity{ID: *id, Instance: *instance},
 		Store:        *storeURL,
+		SpoolCap:     *spoolCap,
 		Upstream:     *upstream,
 		Debug:        *debug,
 	})
