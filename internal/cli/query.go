@@ -46,8 +46,12 @@ func queryCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	until := fs.String("until", "", "end of the window, the same way; default now")
 	lane := fs.String("lane", "", "only this lane's records, where the query takes one")
 	format := fs.String("format", "text", "text or json")
+	erase := fs.String("erase", env("YNR_ERASE", ""), "a file of handles to mask, for a direct read (YNR_ERASE)")
 	if err := fs.Parse(rest); err != nil {
 		return ExitUsage
+	}
+	if code := loadErasure(*erase, stderr); code != ExitOK {
+		return code
 	}
 	extra := fs.Args()
 	if arg == "" && len(extra) > 0 {

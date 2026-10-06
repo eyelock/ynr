@@ -12,11 +12,11 @@ CREATE OR REPLACE VIEW batch_spans AS
 WITH r AS (
   SELECT filename AS file, unnest(resourceSpans) AS rs FROM @traces@
 ), s AS (
-  SELECT file, otel_attrs(rs.resource.attributes) AS resource, unnest(rs.scopeSpans) AS ss FROM r
+  SELECT file, mask_attrs(otel_attrs(rs.resource.attributes)) AS resource, unnest(rs.scopeSpans) AS ss FROM r
 ), x AS (
   SELECT file, resource, ss.scope.name AS scope, unnest(ss.spans) AS sp FROM s
 ), y AS (
-  SELECT file, resource, scope, sp, otel_attrs(sp.attributes) AS attributes,
+  SELECT file, resource, scope, sp, mask_attrs(otel_attrs(sp.attributes)) AS attributes,
          lower(sp.traceId) AS trace_id, lower(sp.spanId) AS span_id
   FROM x
 )
@@ -36,13 +36,13 @@ CREATE OR REPLACE VIEW batch_logs AS
 WITH r AS (
   SELECT filename AS file, unnest(resourceLogs) AS rl FROM @logs@
 ), s AS (
-  SELECT file, rl.resource AS raw_resource, otel_attrs(rl.resource.attributes) AS resource,
+  SELECT file, rl.resource AS raw_resource, mask_attrs(otel_attrs(rl.resource.attributes)) AS resource,
          unnest(rl.scopeLogs) AS sl
   FROM r
 ), x AS (
   SELECT file, raw_resource, resource, sl.scope.name AS scope, unnest(sl.logRecords) AS lr FROM s
 ), y AS (
-  SELECT file, resource, scope, lr, otel_attrs(lr.attributes) AS attributes,
+  SELECT file, resource, scope, lr, mask_attrs(otel_attrs(lr.attributes)) AS attributes,
          md5(raw_resource::VARCHAR || lr::VARCHAR) AS record_hash
   FROM x
 )
@@ -61,7 +61,7 @@ CREATE OR REPLACE VIEW batch_metric_points AS
 WITH r AS (
   SELECT filename AS file, unnest(resourceMetrics) AS rm FROM @metrics@
 ), s AS (
-  SELECT file, rm.resource AS raw_resource, otel_attrs(rm.resource.attributes) AS resource,
+  SELECT file, rm.resource AS raw_resource, mask_attrs(otel_attrs(rm.resource.attributes)) AS resource,
          unnest(rm.scopeMetrics) AS sm
   FROM r
 ), x AS (
@@ -88,13 +88,13 @@ WITH r AS (
   SELECT file, resource, scope, name, unit, type, temporality, monotonic,
          dp.startTimeUnixNano AS start_ns, dp.timeUnixNano AS time_ns,
          coalesce(otel_num(dp.asDouble), otel_num(dp.asInt)) AS value, NULL::DOUBLE AS count,
-         otel_attrs(dp.attributes) AS attributes,
+         mask_attrs(otel_attrs(dp.attributes)) AS attributes,
          md5(raw_resource::VARCHAR || name || dp::VARCHAR) AS record_hash
   FROM p
   UNION ALL
   SELECT file, resource, scope, name, unit, type, temporality, NULL,
          dp.startTimeUnixNano, dp.timeUnixNano, otel_num(dp.sum), otel_num(dp.count),
-         otel_attrs(dp.attributes), md5(raw_resource::VARCHAR || name || dp::VARCHAR)
+         mask_attrs(otel_attrs(dp.attributes)), md5(raw_resource::VARCHAR || name || dp::VARCHAR)
   FROM h
 )
 SELECT record_hash AS record_id,

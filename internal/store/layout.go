@@ -135,3 +135,37 @@ func RollupKey(kind, period string, t time.Time) string {
 	}
 	return fmt.Sprintf("rollups/%s/daily/%04d-%02d-%02d.parquet", kind, t.Year(), int(t.Month()), t.Day())
 }
+
+var (
+	indexPattern  = regexp.MustCompile(`^index/items/(\d{4})/(\d{2})/(\d{2})\.parquet$`)
+	rollupPattern = regexp.MustCompile(`^rollups/(runs|metrics)/(daily/(\d{4})-(\d{2})-(\d{2})|monthly/(\d{4})-(\d{2}))\.parquet$`)
+)
+
+// Span is the time a key's records were received in, from its start to its end, for retention:
+// an hour for batches and compacted parts, a day for the item index and daily rollups, a month
+// for monthly rollups. ok is false for keys retention never touches, such as registries.
+func Span(key string) (from, to time.Time, rollup, ok bool) {
+	if b, err := ParseBatch(key); err == nil {
+		return b.Hour, b.Hour.Add(time.Hour), false, true
+	}
+	if m := compactPattern.FindStringSubmatch(key); m != nil {
+		if h, err := hourOf(m[2], m[3], m[4], m[5]); err == nil {
+			return h, h.Add(time.Hour), false, true
+		}
+	}
+	if m := indexPattern.FindStringSubmatch(key); m != nil {
+		if d, err := time.Parse("2006/01/02", m[1]+"/"+m[2]+"/"+m[3]); err == nil {
+			return d, d.Add(24 * time.Hour), false, true
+		}
+	}
+	if m := rollupPattern.FindStringSubmatch(key); m != nil {
+		if m[3] != "" {
+			if d, err := time.Parse("2006-01-02", m[3]+"-"+m[4]+"-"+m[5]); err == nil {
+				return d, d.Add(24 * time.Hour), true, true
+			}
+		} else if d, err := time.Parse("2006-01", m[6]+"-"+m[7]); err == nil {
+			return d, d.AddDate(0, 1, 0), true, true
+		}
+	}
+	return time.Time{}, time.Time{}, false, false
+}

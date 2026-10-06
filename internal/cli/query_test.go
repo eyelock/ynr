@@ -37,3 +37,12 @@ func TestQueryRefusesBadInput(t *testing.T) {
 		}
 	}
 }
+
+func TestEraseListMustBeReadable(t *testing.T) {
+	if code, _, errs := run("query", "runs", "--erase", "/nonexistent/erase", "--store", store.FolderURL(t.TempDir())); code != ExitConfig || !strings.Contains(errs, "--erase") {
+		t.Fatalf("query with a missing erasure list = %d %q", code, errs)
+	}
+	if code, _, errs := run("serve", "--spool", t.TempDir(), "--erase", "/nonexistent/erase"); code != ExitConfig || !strings.Contains(errs, "--erase") {
+		t.Fatalf("serve with a missing erasure list = %d %q", code, errs)
+	}
+}

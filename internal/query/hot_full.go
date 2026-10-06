@@ -48,7 +48,7 @@ func OpenHot(ctx context.Context, path string, r store.Reader, window time.Durat
 	if err != nil {
 		return nil, err
 	}
-	setup := macros + batchSQL(nil) + `
+	setup := macroSQL() + batchSQL(nil) + `
 CREATE TABLE spans AS FROM batch_spans;
 CREATE TABLE logs AS FROM batch_logs;
 CREATE TABLE metric_points AS FROM batch_metric_points;`
@@ -167,7 +167,7 @@ func (h *Hot) insert(ctx context.Context, signal string, keys []string, now time
 	defer func() { _ = conn.Close() }()
 	src := "batch_" + sig.table
 	if _, _, err := store.ParseCompacted(keys[0]); err == nil {
-		src = parquet(files)
+		src = "(" + maskedParquet(files) + ")"
 	} else if _, err := conn.ExecContext(ctx, batchSQL(map[string][]string{signal: files})); err != nil {
 		return fmt.Errorf("hot tier: %w", err)
 	}

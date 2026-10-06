@@ -39,7 +39,7 @@ func rollDay(ctx context.Context, r store.Reader, day time.Time) error {
 	}
 	d := "DATE " + literal(day.Format("2006-01-02"))
 	return writeRollups(ctx, r, day, store.Daily,
-		macros+batchSQL(files.Batches)+combinedSQL(files.Parts),
+		macroSQL()+batchSQL(files.Batches)+combinedSQL(files.Parts),
 		fmt.Sprintf(`SELECT %s AS day, lane, model, outcome, harness, repo, count(*) AS runs,
   sum(cost_usd) AS cost_usd,
   sum(TRY_CAST(attr(attributes, 'gen_ai.usage.input_tokens') AS BIGINT)) AS input_tokens,
