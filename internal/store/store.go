@@ -75,7 +75,11 @@ func (f *Folder) URL() string { return f.raw }
 
 // Put writes the object to a temporary file beside it, flushes it, and renames it into place, so
 // a reader never sees part of an object.
-func (f *Folder) Put(_ context.Context, key string, data []byte) (err error) {
+func (f *Folder) Put(_ context.Context, key string, data []byte) error {
+	return f.write(key, data, false)
+}
+
+func (f *Folder) write(key string, data []byte, replace bool) (err error) {
 	if !ValidKey(key) {
 		return fmt.Errorf("store: invalid key %q", key)
 	}
@@ -107,10 +111,17 @@ func (f *Folder) Put(_ context.Context, key string, data []byte) (err error) {
 	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
 		return err
 	}
-	if _, err := os.Lstat(path); err == nil {
-		return errors.Join(os.ErrExist, fmt.Errorf("store: %s already exists", key))
+	if !replace {
+		if _, err := os.Lstat(path); err == nil {
+			return errors.Join(os.ErrExist, fmt.Errorf("store: %s already exists", key))
+		}
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// Replace writes the object as Put does, replacing any already there.
+func (f *Folder) Replace(_ context.Context, key string, data []byte) error {
+	return f.write(key, data, true)
 }
 
 // Reader lists a store's objects and says where DuckDB can read each one. Adapters provide only
@@ -126,6 +137,9 @@ type Reader interface {
 	Get(ctx context.Context, key string) ([]byte, error)
 	// Delete removes an object; one already gone is not an error.
 	Delete(ctx context.Context, key string) error
+	// Replace writes an object whole, replacing any already there: for what only the store's
+	// reader writes, such as the item index, never for batches.
+	Replace(ctx context.Context, key string, data []byte) error
 }
 
 // OpenReader opens a store for reading from its URL.

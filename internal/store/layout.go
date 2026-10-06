@@ -111,3 +111,9 @@ func ParseCompacted(key string) (n int, manifest bool, err error) {
 	n, err = strconv.Atoi(m[7])
 	return n, m[6] == "_manifest-", err
 }
+
+// IndexKey is a day's item index (ADR-005): which items appear in which of the day's hours.
+func IndexKey(day time.Time) string {
+	d := day.UTC()
+	return fmt.Sprintf("index/items/%04d/%02d/%02d.parquet", d.Year(), int(d.Month()), d.Day())
+}

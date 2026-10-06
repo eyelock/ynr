@@ -188,3 +188,27 @@ func TestFolderGetAndDelete(t *testing.T) {
 		t.Fatalf("deleting twice: %v", err)
 	}
 }
+
+func TestReplaceOverwritesWhatPutRefuses(t *testing.T) {
+	r, err := OpenReader(FolderURL(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	key := IndexKey(time.Date(2026, 10, 5, 0, 0, 0, 0, time.UTC))
+	if key != "index/items/2026/10/05.parquet" {
+		t.Fatalf("key = %s", key)
+	}
+	if err := r.Replace(ctx, key, []byte("1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Put(ctx, key, []byte("2")); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("put over it = %v", err)
+	}
+	if err := r.Replace(ctx, key, []byte("3")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := r.Get(ctx, key); string(b) != "3" {
+		t.Fatalf("got %q", b)
+	}
+}

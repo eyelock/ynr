@@ -93,7 +93,13 @@ func Run(ctx context.Context, r store.Reader, q *Query, p Params) (*Result, erro
 	if err := q.Check(p); err != nil {
 		return nil, err
 	}
-	files, err := ReadHours(ctx, r, q.Signals, Hours(p.Since, p.Until))
+	read := ReadHours
+	if q.Indexed {
+		read = func(ctx context.Context, r store.Reader, _ []string, hours []time.Time) (Files, error) {
+			return itemFiles(ctx, r, p.Arg, hours)
+		}
+	}
+	files, err := read(ctx, r, q.Signals, Hours(p.Since, p.Until))
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +114,15 @@ func Run(ctx context.Context, r store.Reader, q *Query, p Params) (*Result, erro
 	if _, err := db.ExecContext(ctx, setup); err != nil {
 		return nil, fmt.Errorf("query: preparing the views: %w", err)
 	}
-	return runOn(ctx, db, q, p)
+	res, err := runOn(ctx, db, q, p)
+	if res != nil {
+		for _, fs := range []map[string][]string{files.Parts, files.Batches} {
+			for _, f := range fs {
+				res.Files += len(f)
+			}
+		}
+	}
+	return res, err
 }
 
 // batchSQL points the batch views at the given files of each signal.
