@@ -52,9 +52,11 @@ into ynf's run capture (below).
 
 **How a tool chooses where to write, in order:**
 
-1. The operator set `OTEL_EXPORTER_OTLP_*`: export there over the network (NFR-3).
+1. The operator set `OTEL_EXPORTER_OTLP_*` explicitly: export to that collector over the
+   network, instead of to ynr (NFR-3). No YN tool sets these for itself, so this happens only
+   when someone chooses it.
 2. `YNR_SPOOL` names a writer folder, or the laptop default (`$XDG_STATE_HOME/ynr/spool/local`)
-   exists: write to the spool.
+   exists: write to ynr's spool.
 3. Otherwise: the SDK's no-op providers. Nothing is written and nothing fails (NFR-2).
 
 A long-lived process that found no spool checks again once a minute, so a ynm server started
