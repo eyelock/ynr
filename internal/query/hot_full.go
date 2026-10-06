@@ -150,9 +150,9 @@ func (h *Hot) ingest(ctx context.Context, signal string, keys []string, now time
 }
 
 func (h *Hot) insert(ctx context.Context, signal string, keys []string, now time.Time) error {
-	files := make([]string, len(keys))
-	for i, k := range keys {
-		files[i] = h.r.Location(k)
+	files, err := local(ctx, h.r, keys)
+	if err != nil {
+		return err
 	}
 	var sig = signals[0]
 	for _, x := range signals {

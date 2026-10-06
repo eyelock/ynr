@@ -116,12 +116,16 @@ func ReadHours(ctx context.Context, r store.Reader, signals []string, hours []ti
 			if err != nil {
 				return f, err
 			}
-			for _, k := range h.Parts {
-				f.Parts[s] = append(f.Parts[s], r.Location(k))
+			parts, err := local(ctx, r, h.Parts)
+			if err != nil {
+				return f, err
 			}
-			for _, k := range h.Batches {
-				f.Batches[s] = append(f.Batches[s], r.Location(k))
+			batches, err := local(ctx, r, h.Batches)
+			if err != nil {
+				return f, err
 			}
+			f.Parts[s] = append(f.Parts[s], parts...)
+			f.Batches[s] = append(f.Batches[s], batches...)
 		}
 	}
 	return f, nil

@@ -16,7 +16,11 @@ func TestOpen(t *testing.T) {
 	if _, err := Open(FolderURL(dir)); err != nil {
 		t.Fatalf("folder: %v", err)
 	}
-	for _, bad := range []string{"", "/tmp/x", "file://host/tmp", "file:relative", "s3://bucket", "%"} {
+	t.Setenv("AWS_REGION", "us-east-1")
+	if _, err := Open("s3://bucket/prefix?region=eu-west-2"); err != nil {
+		t.Fatalf("s3: %v", err)
+	}
+	for _, bad := range []string{"", "/tmp/x", "file://host/tmp", "file:relative", "s3:///no-bucket", "s3://bucket/../x", "gs://bucket", "%"} {
 		if _, err := Open(bad); err == nil {
 			t.Errorf("%q: accepted", bad)
 		}
@@ -128,8 +132,8 @@ func TestFolderListsWhatWasPut(t *testing.T) {
 	if _, err := r.List(ctx, "../"); err == nil {
 		t.Fatal("listed outside the store")
 	}
-	if got := r.Location("logs/x.jsonl.gz"); got != filepath.Join(dir, "logs", "x.jsonl.gz") {
-		t.Fatalf("location = %s", got)
+	if got, err := r.Local(ctx, "logs/x.jsonl.gz"); err != nil || got != filepath.Join(dir, "logs", "x.jsonl.gz") {
+		t.Fatalf("local = %s %v", got, err)
 	}
 }
 
