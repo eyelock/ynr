@@ -36,9 +36,18 @@ type sinks struct {
 
 func start(t *testing.T, root string, s sinks) *spoolReceiver {
 	t.Helper()
+	return startWith(t, root, s, nil)
+}
+
+// startWith is start with a chance to change the receiver's configuration first.
+func startWith(t *testing.T, root string, s sinks, tweak func(*Config)) *spoolReceiver {
+	t.Helper()
 	f := NewFactory()
 	cfg := f.CreateDefaultConfig().(*Config)
 	cfg.Root, cfg.CollectorID, cfg.CollectorInstance = root, "gha-eyelock", "job-9"
+	if tweak != nil {
+		tweak(cfg)
+	}
 	set := receivertest.NewNopSettings(Type)
 	ctx := context.Background()
 	tr, err := f.CreateTraces(ctx, set, cfg, s.traces)

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"go.opentelemetry.io/collector/receiver"
 	"go.uber.org/zap"
 
+	"github.com/eyelock/ynr/internal/registry"
 	"github.com/eyelock/ynr/internal/spool"
 	"github.com/eyelock/ynr/internal/stamp"
 	"github.com/eyelock/ynr/internal/store"
@@ -82,6 +84,7 @@ type spoolReceiver struct {
 
 	// Shipping to the store: each signal's stamped lines from the file being read.
 	st                  store.Store
+	checker             *registry.Checker // nil when no registry tools are configured
 	bufs                map[string]*bytes.Buffer
 	batches, forwardErr atomic.Int64
 
@@ -115,6 +118,7 @@ func (r *spoolReceiver) Start(_ context.Context, _ component.Host) error {
 			r.bufs = map[string]*bytes.Buffer{store.Traces: {}, store.Logs: {}, store.Metrics: {}}
 			reader.Ship, reader.ShipAge, reader.ShipBytes = r.ship, r.cfg.ShipAge, r.cfg.ShipBytes
 		}
+		r.learnRegistries()
 		r.reader = reader
 		ctx, cancel := context.WithCancel(context.Background())
 		r.cancel, r.done = cancel, make(chan struct{})
@@ -139,12 +143,50 @@ func (r *spoolReceiver) Shutdown(context.Context) error {
 				cancel()
 			}
 			r.logCounts("spool reader stopped")
+			r.logUnknown("names outside their registries, final")
 		}
 		sharedMu.Lock()
 		delete(shared, r.cfg)
 		sharedMu.Unlock()
 	})
 	return nil
+}
+
+// learnRegistries asks the configured tools for their registries, once (ADR-007). It never
+// fails: whatever goes wrong is logged and the spool is read regardless.
+func (r *spoolReceiver) learnRegistries() {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(len(r.cfg.RegistryTools))*(registry.AskTimeout+5*time.Second)+time.Second)
+	defer cancel()
+	c, problems := registry.LearnTools(ctx, r.cfg.RegistryTools, r.st, r.cfg.CollectorID)
+	for _, err := range problems {
+		r.logger.Warn("ynr: a tool's registry was not learned; its records will be marked unknown", zap.Error(err))
+	}
+	r.checker = c
+	if c != nil {
+		r.logger.Info("registries learned", zap.Strings("tools", c.Tools()))
+	}
+}
+
+// logUnknown reports the names records used that their registries do not declare: the totals,
+// and the most frequent few.
+func (r *spoolReceiver) logUnknown(msg string) {
+	if r.checker == nil {
+		return
+	}
+	counts, overflow := r.checker.Counts()
+	if len(counts) == 0 && overflow == 0 {
+		return
+	}
+	var total int64
+	for _, u := range counts {
+		total += u.Count
+	}
+	r.logger.Warn(msg, zap.Int("distinct", len(counts)), zap.Int64("total", total), zap.Int64("uncounted_past_cap", overflow))
+	slices.SortStableFunc(counts, func(a, b registry.Unknown) int { return int(b.Count - a.Count) })
+	for _, u := range counts[:min(len(counts), 20)] {
+		r.logger.Warn("ynr.registry.unknown_names", zap.String("service", u.Service), zap.String("version", u.Version),
+			zap.String("name", u.Name), zap.Int64("count", u.Count))
+	}
 }
 
 func (r *spoolReceiver) run(ctx context.Context) {
@@ -176,6 +218,7 @@ func (r *spoolReceiver) run(ctx context.Context) {
 			if s := r.reader.Counters.Snapshot(); s != last {
 				last = s
 				r.logCounts("spool reader")
+				r.logUnknown("names outside their registries")
 			}
 		case <-time.After(wait):
 		}
@@ -230,6 +273,9 @@ func (r *spoolReceiver) handle(ctx context.Context, w spool.Writer, line []byte)
 		}
 		for i := 0; i < td.ResourceSpans().Len(); i++ {
 			stamp.Resource(td.ResourceSpans().At(i).Resource().Attributes(), w, id, mr.m, mr.warning)
+			if r.checker != nil {
+				r.checker.Traces(td.ResourceSpans().At(i))
+			}
 		}
 		if err := r.buffer(store.Traces, func() ([]byte, error) { return (&ptrace.JSONMarshaler{}).MarshalTraces(td) }); err != nil {
 			return err
@@ -242,6 +288,9 @@ func (r *spoolReceiver) handle(ctx context.Context, w spool.Writer, line []byte)
 		}
 		for i := 0; i < ld.ResourceLogs().Len(); i++ {
 			stamp.Resource(ld.ResourceLogs().At(i).Resource().Attributes(), w, id, mr.m, mr.warning)
+			if r.checker != nil {
+				r.checker.Logs(ld.ResourceLogs().At(i))
+			}
 		}
 		if err := r.buffer(store.Logs, func() ([]byte, error) { return (&plog.JSONMarshaler{}).MarshalLogs(ld) }); err != nil {
 			return err
@@ -254,6 +303,9 @@ func (r *spoolReceiver) handle(ctx context.Context, w spool.Writer, line []byte)
 		}
 		for i := 0; i < md.ResourceMetrics().Len(); i++ {
 			stamp.Resource(md.ResourceMetrics().At(i).Resource().Attributes(), w, id, mr.m, mr.warning)
+			if r.checker != nil {
+				r.checker.Metrics(md.ResourceMetrics().At(i))
+			}
 		}
 		if err := r.buffer(store.Metrics, func() ([]byte, error) { return (&pmetric.JSONMarshaler{}).MarshalMetrics(md) }); err != nil {
 			return err

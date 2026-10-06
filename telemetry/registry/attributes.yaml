@@ -1,0 +1,53 @@
+groups:
+  - id: registry.ynr
+    type: attribute_group
+    stability: development
+    brief: Attributes ynr stamps on records, and on its own counters.
+    attributes:
+      - id: ynr.provenance
+        type:
+          members:
+            - {id: factory, value: factory, brief: "Written by ynf, outside any run."}
+            - {id: service, value: service, brief: Written by a long-lived hosted server.}
+            - {id: run, value: run, brief: Written inside one run.}
+            - {id: local, value: local, brief: Written on a laptop outside a factory.}
+        stability: development
+        brief: >
+          How far the record can be trusted, decided by the spool folder it was written in and
+          never by the record (ADR-003).
+      - id: ynr.provenance.warning
+        type:
+          members:
+            - {id: no-manifest, value: no-manifest, brief: A run's records with no manifest from ynf.}
+            - {id: bad-manifest, value: bad-manifest, brief: A run's records whose manifest was refused.}
+        stability: development
+        brief: Why a run's records carry no factory attributes.
+      - id: ynr.collector.id
+        type: string
+        stability: development
+        brief: "The collector that stamped the record: a runner pool or a host (ADR-003)."
+        examples: ["gha-eyelock", "local-mymachine"]
+        annotations:
+          ynr.cardinality: 100
+      - id: ynr.collector.instance
+        type: string
+        stability: development
+        brief: The job within the collector's pool, recorded as data and never as identity.
+        examples: ["job-9"]
+      - id: ynr.registry
+        type:
+          members:
+            - {id: unknown, value: unknown, brief: ynr learned no registry for the record's service and version.}
+        stability: development
+        brief: >
+          Set only when ynr has no learned registry for the record's service.name and
+          service.version (ADR-007); the record is kept.
+      - id: ynr.registry.name
+        type: string
+        stability: development
+        brief: >
+          A name a record used that its tool's registry does not declare. Only on
+          ynr.registry.unknown_names, and capped.
+        examples: ["ynh.made.up"]
+        annotations:
+          ynr.cardinality: 1000

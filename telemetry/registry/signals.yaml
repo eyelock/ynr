@@ -1,0 +1,23 @@
+groups:
+  # ynr writes no spans or events of its own; its own telemetry is counters.
+  - id: metric.ynr.spool.evicted
+    type: metric
+    metric_name: ynr.spool.evicted
+    instrument: counter
+    unit: "{file}"
+    stability: development
+    brief: Closed spool files deleted unshipped because the spool reached its cap (ADR-004).
+    attributes: []
+  - id: metric.ynr.registry.unknown_names
+    type: metric
+    metric_name: ynr.registry.unknown_names
+    instrument: counter
+    unit: "{name}"
+    stability: development
+    brief: >
+      Names records used that their tool's learned registry does not declare, by service, version
+      and name. Counted, never rejected; the distinct names are capped (ADR-007).
+    attributes:
+      - {ref: service.name, requirement_level: required}
+      - {ref: service.version, requirement_level: required}
+      - {ref: ynr.registry.name, requirement_level: required, annotations: {ynr.cardinality: 1000}}

@@ -39,6 +39,9 @@ type Config struct {
 	// SpoolCap caps the whole spool in bytes (ADR-004); over it, the oldest closed files are
 	// evicted and counted. Zero is no cap.
 	SpoolCap int64 `mapstructure:"spool_cap"`
+	// RegistryTools are the tools to ask for their telemetry registries at startup, each by bare
+	// name on the PATH (ADR-007). Empty learns nothing, and then no record is checked or marked.
+	RegistryTools []string `mapstructure:"registry_tools"`
 }
 
 func createDefaultConfig() component.Config {

@@ -190,3 +190,39 @@ func TestRelayStopsWhenStdinCloses(t *testing.T) {
 		t.Fatal("the relay kept running after stdin closed")
 	}
 }
+
+func TestTelemetryRegistryPrintsYnrsNamesInTheShapeEveryToolUses(t *testing.T) {
+	code, out, _ := run("telemetry", "registry", "--format", "json")
+	if code != ExitOK {
+		t.Fatalf("exit %d", code)
+	}
+	var r struct {
+		Tool       string                   `json:"tool"`
+		Version    string                   `json:"version"`
+		Semconv    struct{ Version string } `json:"semantic_conventions"`
+		Attributes []struct{ ID string }    `json:"attributes"`
+		Standard   []string                 `json:"standard_attributes"`
+		Metrics    []struct{ Name string }  `json:"metrics"`
+	}
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Tool != "ynr" || r.Version != ynr.Version || r.Semconv.Version == "" || len(r.Attributes) == 0 || len(r.Metrics) == 0 {
+		t.Errorf("%+v", r)
+	}
+	if code, out, _ := run("telemetry", "registry"); code != ExitOK || !strings.Contains(out, "ynr.registry.unknown_names") {
+		t.Errorf("text: %d %q", code, out)
+	}
+	for _, args := range [][]string{{"telemetry"}, {"telemetry", "nope"}, {"telemetry", "registry", "--format", "yaml"}} {
+		if code, _, _ := run(args...); code != ExitUsage {
+			t.Errorf("%v = %d", args, code)
+		}
+	}
+}
+
+func TestSplitList(t *testing.T) {
+	got := splitList(" ynh, ynf,,ynm ,ynh")
+	if strings.Join(got, "|") != "ynh|ynf|ynm" || splitList("") != nil {
+		t.Errorf("%q", got)
+	}
+}
