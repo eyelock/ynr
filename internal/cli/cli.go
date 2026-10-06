@@ -43,12 +43,21 @@ Usage:
             [--collector-id <id>] [--collector-instance <id>] [--poll 1s]
             [--max-line <bytes>] [--spool-cap <bytes>] [--hot-window 168h] [--retain 168h] [--retain-bytes <bytes>]
             [--erase <file>] [--ui 127.0.0.1:4319] [--debug]
+  ynr central --store <url> [--hot-window 6h] [--socket <path>] [--state <folder>] [--poll 5s]
+            [--compact-lookback 24h] [--compact-every 5m] [--erase <file>]
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
             [--exit-on-stdin-eof]
   ynr tail [--spool <root>] [--service <name>] [--item <key>] [--from-start] [--format text|json]
   ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>]
-            [--format text|json]]
+            [--format text|json] [--socket <path>]]
+
+ynr central reads a shared store, such as a bucket the collectors ship to: it keeps the last 6
+hours in a hot tier fed by polling each collector's new files, compacts closed hours under a
+lease in the store so two centrals never compact one hour together, and answers ynr query on a
+Unix socket (--socket on ynr query). It needs the full build, holds nothing that cannot be
+rebuilt from the store, and leaves a bucket's retention to its lifecycle rules. The dashboard
+(--ui) is refused until sign-in is built.
 
 ynr relay prints its OTLP/HTTP endpoint as its first line of output, then runs until it is
 stopped (Ctrl-C, SIGTERM, or with --exit-on-stdin-eof its standard input closing), flushing what
@@ -87,6 +96,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return info(args[1:], stdout, stderr)
 	case "serve":
 		return serve(ctx, args[1:], stderr)
+	case "central":
+		return centralCmd(ctx, args[1:], stderr)
 	case "relay":
 		return relayCmd(ctx, args[1:], stdin, stdout, stderr)
 	case "query":

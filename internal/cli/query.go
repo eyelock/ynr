@@ -41,6 +41,7 @@ func queryCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 	fs := flags("query "+name, stderr)
 	root := fs.String("spool", defaultRoot(), "the spool root of the ynr serve to ask (YNR_SPOOL_ROOT)")
+	socketFlag := fs.String("socket", env("YNR_CENTRAL_SOCKET", ""), "the Unix socket of the ynr central to ask (YNR_CENTRAL_SOCKET)")
 	storeURL := fs.String("store", envOr("YNR_STORE", defaultStore()), "read this store directly, such as file:///path, instead of asking ynr serve (YNR_STORE)")
 	since := fs.String("since", "", "start of the window: a duration back from now (24h, 7d) or a time (RFC 3339); default "+days(q.Since))
 	until := fs.String("until", "", "end of the window, the same way; default now")
@@ -76,8 +77,11 @@ func queryCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 
 	// Ask the running ynr serve, whose hot tier answers in milliseconds; read the store
 	// directly when none answers, or when --store names one.
-	if !direct && *root != "" {
+	if !direct && (*root != "" || *socketFlag != "") {
 		_, socket := hotPaths(*root)
+		if *socketFlag != "" {
+			socket = *socketFlag
+		}
 		doc, res, err := query.Ask(ctx, socket, name, raw)
 		var se *query.ServerError
 		switch {
@@ -88,6 +92,9 @@ func queryCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			return ExitUsage
 		case errors.As(err, &se):
 			_, _ = fmt.Fprintf(stderr, "ynr: ynr serve: %v\n", err)
+			return ExitAdapter
+		case errors.Is(err, query.ErrNoServer) && *socketFlag != "":
+			_, _ = fmt.Fprintf(stderr, "ynr: nothing is answering on %s; is ynr central running?\n", *socketFlag)
 			return ExitAdapter
 		case !errors.Is(err, query.ErrNoServer):
 			_, _ = fmt.Fprintf(stderr, "ynr: asking ynr serve: %v\n", err)

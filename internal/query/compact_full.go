@@ -41,20 +41,47 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 				continue
 			}
 			if len(h.Batches) > 0 || affected {
-				if err := compactHour(ctx, r, sig, t, h, now); err != nil {
+				// Take the hour's lease, then read the hour again: another central may have
+				// compacted it since it was listed, and one manifest per round is enough.
+				var did bool
+				held, err := withLease(ctx, r, LeaseKey(sig.name, t), c.Holder, c.LeaseTTL, func() time.Time { return time.Now() },
+					func(ctx context.Context) error {
+						cur, err := ReadHour(ctx, r, sig.name, t)
+						if err != nil {
+							return err
+						}
+						aff := false
+						if affected {
+							if aff, err = holdsErased(ctx, r, cur); err != nil {
+								return err
+							}
+						}
+						h, affected = cur, aff
+						if len(cur.Batches) == 0 && !aff {
+							return nil
+						}
+						did = true
+						return compactHour(ctx, r, sig, t, cur, now)
+					})
+				if err != nil {
 					errs = append(errs, fmt.Errorf("compacting %s %s: %w", sig.name, t.Format("2006-01-02T15"), err))
 					continue
 				}
-				compacted++
-				if slices.Contains(indexed, sig.name) {
-					days[t.Truncate(24*time.Hour)] = true
+				if !held {
+					continue // another central is compacting it
 				}
-				if sig.name != store.Logs {
-					rolled[t.Truncate(24*time.Hour)] = true
-				}
-				if h, err = ReadHour(ctx, r, sig.name, t); err != nil {
-					errs = append(errs, err)
-					continue
+				if did {
+					compacted++
+					if slices.Contains(indexed, sig.name) {
+						days[t.Truncate(24*time.Hour)] = true
+					}
+					if sig.name != store.Logs {
+						rolled[t.Truncate(24*time.Hour)] = true
+					}
+					if h, err = ReadHour(ctx, r, sig.name, t); err != nil {
+						errs = append(errs, err)
+						continue
+					}
 				}
 			}
 			keep := c.Keep
