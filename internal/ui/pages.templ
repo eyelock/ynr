@@ -29,6 +29,12 @@ templ layout(title, active string) {
 					@navLink("/items", "Items", active)
 					@navLink("/tail", "Live tail", active)
 				</nav>
+				if user(ctx) != "" {
+					<form class="signout" action="/auth/logout" method="post">
+						<span class="who">{ user(ctx) }</span>
+						<button type="submit">Sign out</button>
+					</form>
+				}
 			</header>
 			<main>
 				{ children... }
