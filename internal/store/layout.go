@@ -117,3 +117,21 @@ func IndexKey(day time.Time) string {
 	d := day.UTC()
 	return fmt.Sprintf("index/items/%04d/%02d/%02d.parquet", d.Year(), int(d.Month()), d.Day())
 }
+
+// Rollup kinds and periods (ADR-005): run totals and metric aggregates, by day and by month.
+const (
+	RollupRuns    = "runs"
+	RollupMetrics = "metrics"
+	Daily         = "daily"
+	Monthly       = "monthly"
+)
+
+// RollupKey is where a kind's rollup for a day or a month is: rollups/<kind>/daily/<yyyy-mm-dd>
+// or rollups/<kind>/monthly/<yyyy-mm>.
+func RollupKey(kind, period string, t time.Time) string {
+	t = t.UTC()
+	if period == Monthly {
+		return fmt.Sprintf("rollups/%s/monthly/%04d-%02d.parquet", kind, t.Year(), int(t.Month()))
+	}
+	return fmt.Sprintf("rollups/%s/daily/%04d-%02d-%02d.parquet", kind, t.Year(), int(t.Month()), t.Day())
+}

@@ -24,7 +24,8 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 	now = now.UTC()
 	last := now.Add(-time.Hour - c.Grace).Truncate(time.Hour) // the last hour closed for long enough
 	var errs []error
-	days := map[time.Time]bool{} // days whose item index must be rewritten
+	days := map[time.Time]bool{}   // days whose item index must be rewritten
+	rolled := map[time.Time]bool{} // days whose rollups must be rewritten
 	for _, sig := range signals {
 		for t := now.Add(-c.Lookback).Truncate(time.Hour); !t.After(last); t = t.Add(time.Hour) {
 			h, err := ReadHour(ctx, r, sig.name, t)
@@ -40,6 +41,9 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 				compacted++
 				if slices.Contains(indexed, sig.name) {
 					days[t.Truncate(24*time.Hour)] = true
+				}
+				if sig.name != store.Logs {
+					rolled[t.Truncate(24*time.Hour)] = true
 				}
 				if h, err = ReadHour(ctx, r, sig.name, t); err != nil {
 					errs = append(errs, err)
@@ -62,7 +66,45 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 			errs = append(errs, buildIndex(ctx, r, day))
 		}
 	}
+	errs = append(errs, rollUp(ctx, r, c, now, rolled))
 	return compacted, errors.Join(errs...)
+}
+
+// rollUp writes the rollups of each closed day in the lookback whose hours were compacted in
+// this pass, or that has compacted hours but no rollup, then of each closed month holding one.
+func rollUp(ctx context.Context, r store.Reader, c Compaction, now time.Time, touched map[time.Time]bool) error {
+	var errs []error
+	months := map[time.Time]bool{}
+	for d := now.Add(-c.Lookback).Truncate(24 * time.Hour); !d.Add(24 * time.Hour).Add(time.Hour + c.Grace).After(now); d = d.AddDate(0, 0, 1) {
+		need := touched[d]
+		if !need {
+			have, err := exists(ctx, r, store.RollupKey(store.RollupRuns, store.Daily, d))
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if !have {
+				for _, sig := range []string{store.Traces, store.Metrics} {
+					ks, err := r.List(ctx, "compacted/"+sig+"/"+d.Format("2006/01/02")+"/")
+					errs = append(errs, err)
+					need = need || len(ks) > 0
+				}
+			}
+		}
+		if need {
+			if err := rollDay(ctx, r, d); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			months[time.Date(d.Year(), d.Month(), 1, 0, 0, 0, 0, time.UTC)] = true
+		}
+	}
+	for m := range months {
+		if !m.AddDate(0, 1, 0).Add(time.Hour + c.Grace).After(now) {
+			errs = append(errs, rollMonth(ctx, r, m))
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // indexMissing reports whether a day has compacted hours but no item index.

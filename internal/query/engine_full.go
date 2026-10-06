@@ -93,6 +93,9 @@ func Run(ctx context.Context, r store.Reader, q *Query, p Params) (*Result, erro
 	if err := q.Check(p); err != nil {
 		return nil, err
 	}
+	if q.RollupSQL != "" && p.Until.Sub(p.Since) > LongRange {
+		return runRollups(ctx, r, q, p)
+	}
 	read := ReadHours
 	if q.Indexed {
 		read = func(ctx context.Context, r store.Reader, _ []string, hours []time.Time) (Files, error) {

@@ -29,6 +29,9 @@ type Query struct {
 	Signals []string
 	// Indexed queries read only the hours the item index names for the item in Arg.
 	Indexed bool
+	// RollupSQL, where set, answers windows longer than LongRange from the rollups alone, over
+	// the views run_rollups and metric_rollups, in whole days.
+	RollupSQL string
 	// SQL is DuckDB SQL over spans, logs and metric_points (batches.sql), with the
 	// named parameters $since and $until (timestamps), $arg and $lane (text).
 	SQL string
@@ -46,9 +49,15 @@ type Params struct {
 type Result struct {
 	Columns []string
 	Rows    [][]any
-	// Files is how many parts and batches a direct read opened, for tests and debugging.
+	// Files is how many parts, batches or rollups a direct read opened, for tests and debugging.
 	Files int
+	// FromRollups says the answer came from the rollups, in whole days.
+	FromRollups bool
 }
+
+// LongRange is the longest window a query with rollups answers from records; longer windows
+// read the rollups (ADR-005).
+const LongRange = 7 * 24 * time.Hour
 
 // Hours are the hours whose batches can hold records from since to until: a record is never
 // received before it happens, and an hour either side covers clock skew between machines.
@@ -115,6 +124,13 @@ FROM spans
 WHERE name = 'ynh.run' AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane)
 GROUP BY ALL
 ORDER BY lane, runs DESC, outcome`,
+		RollupSQL: `
+SELECT coalesce(lane, '(by hand)') AS lane, coalesce(outcome, '(none)') AS outcome,
+       sum(runs) AS runs, NULL::DOUBLE AS median_s, round(sum(cost_usd), 4) AS cost_usd, max(day) AS last
+FROM run_rollups
+WHERE $lane = '' OR lane = $lane
+GROUP BY ALL
+ORDER BY lane, runs DESC, outcome`,
 	},
 	{
 		Name:    "item",
@@ -168,6 +184,13 @@ SELECT coalesce(model, '(unknown)') AS model, count(*) AS runs,
        sum(TRY_CAST(attr(attributes, 'gen_ai.usage.output_tokens') AS BIGINT)) AS output_tokens
 FROM spans
 WHERE name = 'ynh.run' AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane)
+GROUP BY ALL
+ORDER BY cost_usd DESC NULLS LAST, model`,
+		RollupSQL: `
+SELECT coalesce(model, '(unknown)') AS model, sum(runs) AS runs, round(sum(cost_usd), 4) AS cost_usd,
+       sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens
+FROM run_rollups
+WHERE $lane = '' OR lane = $lane
 GROUP BY ALL
 ORDER BY cost_usd DESC NULLS LAST, model`,
 	},
