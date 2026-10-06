@@ -62,7 +62,7 @@ brews:
   - repository:
       owner: eyelock
       name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+      token: "{{ .Env.GITHUB_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/eyelock/ynr"
     description: "Your named reporting: the observation plane for the ynh, ynm and ynf factory"
