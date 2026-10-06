@@ -56,10 +56,18 @@ type Options struct {
 	Poll      time.Duration
 	Filter    Filter
 	JSON      bool
+	// Ready, when set, is closed once the follower has seen where each file ends: what is
+	// written after that is in the stream.
+	Ready chan struct{}
 }
 
 // Follow writes the stream to w until ctx ends.
 func Follow(ctx context.Context, o Options, w io.Writer) error {
+	return Stream(ctx, o, func(r Record) error { return Write(w, r, o.JSON) })
+}
+
+// Stream hands each record that passes the filter to emit until ctx ends or emit fails.
+func Stream(ctx context.Context, o Options, emit func(Record) error) error {
 	f, err := spool.NewFollower(o.Root, 0, o.FromStart)
 	if err != nil {
 		return err
@@ -75,7 +83,7 @@ func Follow(ctx context.Context, o Options, w io.Writer) error {
 			}
 			for _, r := range recs {
 				if o.Filter.keep(r) {
-					if err := Write(w, r, o.JSON); err != nil {
+					if err := emit(r); err != nil {
 						return err
 					}
 				}
@@ -84,6 +92,10 @@ func Follow(ctx context.Context, o Options, w io.Writer) error {
 		})
 		if err != nil && !errors.Is(err, context.Canceled) {
 			return err
+		}
+		if o.Ready != nil {
+			close(o.Ready)
+			o.Ready = nil
 		}
 		select {
 		case <-ctx.Done():

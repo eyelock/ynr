@@ -103,11 +103,12 @@ func TestFollowShowsNewRecordsWithTheirLane(t *testing.T) {
 	var out syncBuf
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
+	ready := make(chan struct{})
 	go func() {
 		done <- Follow(ctx, Options{Root: root, Poll: 20 * time.Millisecond, JSON: true,
-			Filter: Filter{Item: "github.com/eyelock/ynr#12"}}, &out)
+			Filter: Filter{Item: "github.com/eyelock/ynr#12"}, Ready: ready}, &out)
 	}()
-	time.Sleep(100 * time.Millisecond)
+	<-ready
 	f, err := os.OpenFile(file, os.O_APPEND|os.O_WRONLY, 0)
 	if err != nil {
 		t.Fatal(err)
@@ -133,9 +134,14 @@ func TestFollowShowsNewRecordsWithTheirLane(t *testing.T) {
 		}
 		recs = append(recs, r)
 	}
-	// The run's event and span, both stamped with the run's lane and item, and the local event.
-	if len(recs) != 3 || recs[0].Lane != "github.com/eyelock/ynr#lint" || recs[1].Name != "ynh.run" ||
-		recs[1].Item != "github.com/eyelock/ynr#12" || recs[2].Writer != "local" {
+	// The run's event and span, both stamped with the run's lane and item, and the local event,
+	// in whatever order the polls found them.
+	got := map[string]Record{}
+	for _, r := range recs {
+		got[r.Writer+" "+r.Kind] = r
+	}
+	if len(recs) != 3 || got["runs/run-1 event"].Lane != "github.com/eyelock/ynr#lint" ||
+		got["runs/run-1 span"].Item != "github.com/eyelock/ynr#12" || got["local event"].Lane != "" {
 		t.Fatalf("stream = %+v", recs)
 	}
 }
