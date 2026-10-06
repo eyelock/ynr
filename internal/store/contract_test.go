@@ -5,10 +5,15 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // stores are the adapters the contract runs against: the folder always, and S3 when
@@ -121,4 +126,110 @@ func TestStoreContract(t *testing.T) {
 func readFile(p string) string {
 	b, _ := os.ReadFile(p)
 	return string(b)
+}
+
+// TestStoreContractCentral covers what central needs: version tags and conditional replace for
+// leases, an hour's collectors, and listing only the keys after a position.
+func TestStoreContractCentral(t *testing.T) {
+	for name, r := range stores(t) {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			hour := time.Date(2026, 10, 6, 9, 0, 0, 0, time.UTC)
+			lease := "leases/compaction/traces/2026/10/06/09.json"
+
+			if _, _, err := r.GetWithTag(ctx, lease); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("a missing tag get = %v", err)
+			}
+			if err := r.ReplaceIf(ctx, lease, []byte("x"), "nope"); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("replacing a missing object = %v", err)
+			}
+			if err := r.Put(ctx, lease, []byte("a")); err != nil {
+				t.Fatal(err)
+			}
+			data, tag, err := r.GetWithTag(ctx, lease)
+			if err != nil || string(data) != "a" || tag == "" {
+				t.Fatalf("get with tag = %q %q %v", data, tag, err)
+			}
+			if err := r.ReplaceIf(ctx, lease, []byte("b"), tag); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.ReplaceIf(ctx, lease, []byte("c"), tag); !errors.Is(err, ErrChanged) {
+				t.Fatalf("replacing with a stale tag = %v, want ErrChanged", err)
+			}
+			if b, _ := r.Get(ctx, lease); string(b) != "b" {
+				t.Fatalf("after a refused replace = %q", b)
+			}
+
+			// Of many writers that read the same version, exactly one wins.
+			_, tag, _ = r.GetWithTag(ctx, lease)
+			var wins atomic.Int32
+			var wg sync.WaitGroup
+			for i := range 8 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if r.ReplaceIf(ctx, lease, []byte(fmt.Sprintf("w%d", i)), tag) == nil {
+						wins.Add(1)
+					}
+				}()
+			}
+			wg.Wait()
+			if wins.Load() != 1 {
+				t.Fatalf("%d concurrent replaces won, want 1", wins.Load())
+			}
+
+			// Of many puts of one key, exactly one wins.
+			wins.Store(0)
+			for range 8 {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if r.Put(ctx, "leases/compaction/traces/2026/10/06/10.json", []byte("p")) == nil {
+						wins.Add(1)
+					}
+				}()
+			}
+			wg.Wait()
+			if wins.Load() != 1 {
+				t.Fatalf("%d concurrent puts won, want 1", wins.Load())
+			}
+
+			put := func(collector, ship string) string {
+				k := BatchKey(Traces, hour.Add(5*time.Minute), collector, ship, "src-1", 0, 1)
+				if err := r.Put(ctx, k, []byte("x")); err != nil {
+					t.Fatal(err)
+				}
+				return k
+			}
+			a1, a2, a3 := put("alpha", "01AAAAAAAAAAAAAAAAAAAAAAAA"), put("alpha", "01BBBBBBBBBBBBBBBBBBBBBBBB"), put("alpha", "01CCCCCCCCCCCCCCCCCCCCCCCC")
+			put("beta", "01AAAAAAAAAAAAAAAAAAAAAAAA")
+			put("beta", "01AAAAAAAAAAAAAAAAAAAAAAAB")
+			// Another hour and another signal are not this hour's collectors.
+			if err := r.Put(ctx, BatchKey(Traces, hour.Add(time.Hour), "gamma", "01AAAAAAAAAAAAAAAAAAAAAAAA", "s-1", 0, 1), []byte("x")); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.Put(ctx, BatchKey(Logs, hour, "delta", "01AAAAAAAAAAAAAAAAAAAAAAAA", "s-1", 0, 1), []byte("x")); err != nil {
+				t.Fatal(err)
+			}
+			cs, err := r.ListCollectors(ctx, Traces, hour)
+			sort.Strings(cs)
+			if err != nil || strings.Join(cs, " ") != "alpha beta" {
+				t.Fatalf("collectors = %v %v", cs, err)
+			}
+			if cs, err := r.ListCollectors(ctx, Metrics, hour); err != nil || len(cs) != 0 {
+				t.Fatalf("collectors of an empty hour = %v %v", cs, err)
+			}
+			prefix := "traces/2026/10/06/09/alpha/"
+			after, err := r.ListAfter(ctx, prefix, a1)
+			if err != nil || strings.Join(after, " ") != a2+" "+a3 {
+				t.Fatalf("after the first = %v %v", after, err)
+			}
+			if after, err := r.ListAfter(ctx, prefix, a3); err != nil || len(after) != 0 {
+				t.Fatalf("after the last = %v %v", after, err)
+			}
+			if all, err := r.ListAfter(ctx, prefix, ""); err != nil || len(all) != 3 {
+				t.Fatalf("after nothing = %v %v", all, err)
+			}
+		})
+	}
 }

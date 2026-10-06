@@ -33,6 +33,7 @@ type Hot struct {
 	seen    map[string]bool
 	synced  time.Time // when the last Sync began; zero before the first
 	evicted time.Time
+	feed    *Feed // when set, recent hours are read through it
 	// Failed counts batch files the hot tier could not read; they are skipped, not retried.
 	Failed int
 }
@@ -75,33 +76,54 @@ func (h *Hot) Run(ctx context.Context, q *Query, p Params) (*Result, error) {
 	return runOn(ctx, h.db, q, p)
 }
 
+// UseFeed makes Sync read the current and previous hour through the polling change feed (a
+// listing position per collector, so a poll reads only new keys) instead of listing them whole.
+func (h *Hot) UseFeed() { h.feed = NewFeed(h.r) }
+
 // Sync reads the batches that have landed since the last Sync: the whole window the first time,
-// then the hours since the last Sync began, with an hour's margin.
+// then the hours since the last Sync began, with an hour's margin. With a feed, only the first
+// Sync reads the older hours whole; every Sync reads the last two hours from the feed.
 func (h *Hot) Sync(ctx context.Context) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	now := h.now().UTC()
 	from := now.Add(-h.window)
-	if !h.synced.IsZero() {
+	first := h.synced.IsZero()
+	if !first {
 		from = h.synced.Add(-time.Hour)
 	}
-	h.synced = now
 	var all []time.Time
-	for t := from.Truncate(time.Hour); !t.After(now); t = t.Add(time.Hour) {
-		all = append(all, t)
+	if h.feed == nil || first {
+		// With a feed, the hours the feed covers (this one and the one before) are left to it.
+		end := now.Truncate(time.Hour).Add(time.Hour)
+		if h.feed != nil {
+			end = now.Truncate(time.Hour).Add(-time.Hour)
+		}
+		for t := from.Truncate(time.Hour); t.Before(end); t = t.Add(time.Hour) {
+			all = append(all, t)
+		}
 	}
 	var errs []error
+	var polled map[string][]string
+	if h.feed != nil {
+		var err error
+		polled, err = h.feed.Poll(ctx, now, []string{store.Traces, store.Logs, store.Metrics})
+		errs = append(errs, err)
+	}
+	var unread bool // an hour that could not be listed
 	for _, sig := range signals {
 		var parts, batches []string
 		for _, t := range all {
 			hr, err := ReadHour(ctx, h.r, sig.name, t)
 			if err != nil {
 				errs = append(errs, err)
+				unread = true
 				continue
 			}
 			parts = append(parts, h.unseen(hr.Parts)...)
 			batches = append(batches, h.unseen(hr.Batches)...)
 		}
+		batches = append(batches, h.unseen(polled[sig.name])...)
 		for _, keys := range [][]string{parts, batches} {
 			for len(keys) > 0 {
 				n := min(chunk, len(keys))
@@ -113,6 +135,11 @@ func (h *Hot) Sync(ctx context.Context) error {
 	if now.Sub(h.evicted) >= time.Hour {
 		errs = append(errs, h.evict(ctx, now))
 		h.evicted = now
+	}
+	// With a feed, a first Sync whose older hours failed to read is repeated, so a restart
+	// never leaves a hole in the window; what was read is skipped as seen.
+	if h.feed == nil || !first || !unread {
+		h.synced = now
 	}
 	return errors.Join(errs...)
 }
@@ -241,6 +268,13 @@ func ServeHot(ctx context.Context, cfg HotConfig) error {
 			_ = ui.Shutdown(sctx)
 		}
 	}()
+	if cfg.Feed {
+		h.UseFeed()
+	}
+	every := cfg.CompactEvery
+	if every <= 0 {
+		every = time.Minute
+	}
 	tick := time.NewTicker(cfg.Poll)
 	defer tick.Stop()
 	var compacted time.Time
@@ -248,7 +282,7 @@ func ServeHot(ctx context.Context, cfg HotConfig) error {
 		if err := h.Sync(ctx); err != nil && ctx.Err() == nil {
 			cfg.Logf("hot tier: %v", err)
 		}
-		if cfg.Compact != nil && time.Since(compacted) >= time.Minute {
+		if cfg.Compact != nil && time.Since(compacted) >= every {
 			compacted = time.Now()
 			if _, err := Compact(ctx, cfg.Store, *cfg.Compact, compacted); err != nil && ctx.Err() == nil {
 				cfg.Logf("compaction: %v", err)

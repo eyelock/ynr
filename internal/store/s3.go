@@ -14,6 +14,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -114,19 +115,93 @@ func (s *S3) Replace(ctx context.Context, key string, data []byte) error {
 
 // Get reads an object.
 func (s *S3) Get(ctx context.Context, key string) ([]byte, error) {
+	b, _, err := s.GetWithTag(ctx, key)
+	return b, err
+}
+
+// GetWithTag reads an object and returns its ETag.
+func (s *S3) GetWithTag(ctx context.Context, key string) ([]byte, string, error) {
 	k, err := s.key(key)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	out, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: &s.bucket, Key: &k})
 	if notFound(err) {
-		return nil, fmt.Errorf("store: %s: %w", key, os.ErrNotExist)
+		return nil, "", fmt.Errorf("store: %s: %w", key, os.ErrNotExist)
 	}
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	defer func() { _ = out.Body.Close() }()
-	return io.ReadAll(out.Body)
+	b, err := io.ReadAll(out.Body)
+	return b, aws.ToString(out.ETag), err
+}
+
+// ReplaceIf replaces an object with a conditional write that names the ETag it must still have
+// (If-Match).
+func (s *S3) ReplaceIf(ctx context.Context, key string, data []byte, tag string) error {
+	k, err := s.key(key)
+	if err != nil {
+		return err
+	}
+	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: &s.bucket, Key: &k, Body: bytes.NewReader(data), IfMatch: aws.String(tag),
+	})
+	switch {
+	case status(err) == http.StatusPreconditionFailed || status(err) == http.StatusConflict:
+		return errors.Join(ErrChanged, fmt.Errorf("store: %s", key))
+	case notFound(err):
+		return fmt.Errorf("store: %s: %w", key, os.ErrNotExist)
+	}
+	return err
+}
+
+// ListCollectors lists the hour's prefix with a '/' delimiter, so the answer is the collectors,
+// however many batches they have shipped.
+func (s *S3) ListCollectors(ctx context.Context, signal string, hour time.Time) ([]string, error) {
+	h := hour.UTC()
+	full := fmt.Sprintf("%s%s/%04d/%02d/%02d/%02d/", s.prefix, signal, h.Year(), int(h.Month()), h.Day(), h.Hour())
+	var out []string
+	p := s3.NewListObjectsV2Paginator(s.client, &s3.ListObjectsV2Input{Bucket: &s.bucket, Prefix: &full, Delimiter: aws.String("/")})
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, cp := range page.CommonPrefixes {
+			if id := strings.TrimSuffix(strings.TrimPrefix(aws.ToString(cp.Prefix), full), "/"); ValidKey(id) {
+				out = append(out, id)
+			}
+		}
+	}
+	return out, nil
+}
+
+// ListAfter lists the keys under prefix that sort after a key, starting the listing there
+// (StartAfter), so keys already seen are not returned.
+func (s *S3) ListAfter(ctx context.Context, prefix, after string) ([]string, error) {
+	if prefix != "" && (!strings.HasSuffix(prefix, "/") || !ValidKey(strings.TrimSuffix(prefix, "/"))) {
+		return nil, fmt.Errorf("store: invalid prefix %q", prefix)
+	}
+	full := s.prefix + prefix
+	in := &s3.ListObjectsV2Input{Bucket: &s.bucket, Prefix: &full}
+	if after != "" {
+		in.StartAfter = aws.String(s.prefix + after)
+	}
+	var out []string
+	p := s3.NewListObjectsV2Paginator(s.client, in)
+	for p.HasMorePages() {
+		page, err := p.NextPage(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, o := range page.Contents {
+			if k := strings.TrimPrefix(aws.ToString(o.Key), s.prefix); ValidKey(k) {
+				out = append(out, k)
+			}
+		}
+	}
+	return out, nil
 }
 
 // Delete removes an object; S3 treats one already gone as deleted.

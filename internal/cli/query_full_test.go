@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -120,5 +121,60 @@ func TestQueryAsksTheRunningServer(t *testing.T) {
 	cancel()
 	if code := <-done; code != ExitOK {
 		t.Fatalf("serve = %d", code)
+	}
+}
+
+// TestQueryAsksCentral: ynr central runs over a shared store and ynr query --socket asks it, with
+// no store configured for the query itself. A second central refuses to share its socket.
+func TestQueryAsksCentral(t *testing.T) {
+	dir, err := os.MkdirTemp("", "ynr") // short: the socket lives under it
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	shared := t.TempDir()
+	s, err := store.Open(store.FolderURL(shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, _ = zw.Write([]byte(strings.ReplaceAll(runLine, `"1791235800000000000"`, `"`+strconv.FormatInt(at.Add(-time.Minute).UnixNano(), 10)+`"`) + "\n"))
+	_ = zw.Close()
+	if err := s.Put(context.Background(), store.BatchKey(store.Traces, at, "pool-a", store.NewULID(at), "local.a", 0, 1), buf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(dir, "c.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() {
+		var out, errb bytes.Buffer
+		done <- Run(ctx, []string{"central", "--store", store.FolderURL(shared), "--state", filepath.Join(dir, "state"),
+			"--socket", socket, "--poll", "50ms"}, &out, &errb)
+	}()
+	t.Setenv("YNR_STORE", "")
+	t.Setenv("YNR_SPOOL_ROOT", "")
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		code, out, errs := run("query", "cost", "--socket", socket)
+		if code == ExitOK && strings.Contains(out, "claude-opus-5-5") {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("query = %d %q %q", code, out, errs)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if code, _, errs := run("central", "--store", store.FolderURL(shared), "--state", filepath.Join(dir, "state2"), "--socket", socket); code != ExitAdapter || !strings.Contains(errs, "already answering") {
+		t.Errorf("a second central on the socket = %d %q", code, errs)
+	}
+	cancel()
+	if code := <-done; code != ExitOK {
+		t.Fatalf("central = %d", code)
+	}
+	if code, _, errs := run("query", "cost", "--socket", socket); code != ExitAdapter || !strings.Contains(errs, "central running") {
+		t.Errorf("asking a stopped central = %d %q", code, errs)
 	}
 }

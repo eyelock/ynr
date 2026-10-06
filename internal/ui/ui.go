@@ -1,6 +1,6 @@
-// Package ui is the local dashboard (ADR-005): server-rendered pages, written with templ and made
+// Package ui is the dashboard (ADR-005): server-rendered pages, written with templ and made
 // live with htmx, each fragment from a named query. It is off by default; ynr serve --ui turns it
-// on, bound to loopback. Its scripts and styles are embedded, so it works offline.
+// on, bound to loopback; ynr central --ui serves it behind sign-in (internal/auth). Its scripts and styles are embedded, so it works offline.
 package ui
 
 //go:generate go run github.com/a-h/templ/cmd/templ@v0.3.1070 generate
@@ -31,6 +31,25 @@ type Config struct {
 	// Spool is the spool root the live tail follows.
 	Spool string
 	Now   func() time.Time
+	// AllowHost says which Host headers are answered; nil answers only this machine's
+	// loopback, which is what the local dashboard wants. Central answers the host its
+	// sign-in's redirect URL names.
+	AllowHost func(host string) bool
+	// Auth, when set, wraps the pages, assets and live tail, so each needs what it checks.
+	Auth func(http.Handler) http.Handler
+}
+
+type userKey struct{}
+
+// WithUser carries who is signed in, by handle, to the pages.
+func WithUser(ctx context.Context, handle string) context.Context {
+	return context.WithValue(ctx, userKey{}, handle)
+}
+
+// user is who is signed in, or empty on the local dashboard.
+func user(ctx context.Context) string {
+	h, _ := ctx.Value(userKey{}).(string)
+	return h
 }
 
 // Handler serves the dashboard.
@@ -48,7 +67,11 @@ func Handler(cfg Config) http.Handler {
 	mux.HandleFunc("GET /trace/{id}", s.trace)
 	mux.HandleFunc("GET /tail", s.tailPage)
 	mux.HandleFunc("GET /tail/stream", s.tailStream)
-	return guard(mux)
+	var h http.Handler = mux
+	if cfg.Auth != nil {
+		h = cfg.Auth(h)
+	}
+	return guard(h, cfg.AllowHost)
 }
 
 type server struct{ cfg Config }
@@ -56,15 +79,13 @@ type server struct{ cfg Config }
 // guard answers only requests addressed to this machine, so a web page elsewhere cannot reach
 // the dashboard by rebinding its own name to 127.0.0.1, and sets a policy that runs only the
 // dashboard's own scripts.
-func guard(next http.Handler) http.Handler {
+func guard(next http.Handler, allow func(string) bool) http.Handler {
+	if allow == nil {
+		allow = loopbackHost
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host := r.Host
-		if h, _, err := net.SplitHostPort(host); err == nil {
-			host = h
-		}
-		host = strings.Trim(host, "[]")
-		if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
-			http.Error(w, "the dashboard answers only on this machine's loopback address", http.StatusMisdirectedRequest)
+		if !allow(r.Host) {
+			http.Error(w, "the dashboard does not answer on this address", http.StatusMisdirectedRequest)
 			return
 		}
 		h := w.Header()
@@ -73,6 +94,16 @@ func guard(next http.Handler) http.Handler {
 		h.Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
 	})
+}
+
+// loopbackHost is true for this machine's own names.
+func loopbackHost(host string) bool {
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.Trim(host, "[]")
+	ip := net.ParseIP(host)
+	return host == "localhost" || (ip != nil && ip.IsLoopback())
 }
 
 func cacheFor(d time.Duration, next http.Handler) http.Handler {
@@ -186,6 +217,10 @@ func (s *server) tailPage(w http.ResponseWriter, r *http.Request) {
 
 // tailStream sends the live tail as server-sent events, each a rendered table row.
 func (s *server) tailStream(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Spool == "" {
+		http.Error(w, "no spool to follow here", http.StatusNotFound)
+		return
+	}
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
