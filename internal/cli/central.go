@@ -13,7 +13,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -23,17 +22,6 @@ import (
 	"github.com/eyelock/ynr/internal/store"
 	uidash "github.com/eyelock/ynr/internal/ui"
 )
-
-// splitList splits a comma-separated flag, dropping blanks.
-func splitList(s string) []string {
-	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
 
 // centralState is where central keeps its hot tier's database and, by default, its socket:
 // $XDG_STATE_HOME/ynr/central, or ~/.local/state/ynr/central. It is a cache; deleting it
