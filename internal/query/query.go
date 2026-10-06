@@ -116,7 +116,7 @@ ORDER BY lane, runs DESC, outcome`,
 		Name:    "item",
 		Help:    "what happened to one work item, by its key: its steps, runs and events in order",
 		Arg:     "<item key>",
-		Since:   30 * 24 * time.Hour,
+		Since:   7 * 24 * time.Hour,
 		Signals: []string{store.Traces, store.Logs},
 		SQL: `
 SELECT time, 'span' AS record, name, service, outcome, round(duration_ms, 1) AS duration_ms,
@@ -133,7 +133,7 @@ ORDER BY time, record DESC, name`,
 		Name:    "trace",
 		Help:    "one trace's spans as a tree, by trace id",
 		Arg:     "<trace id>",
-		Since:   30 * 24 * time.Hour,
+		Since:   7 * 24 * time.Hour,
 		Signals: []string{store.Traces},
 		SQL: `
 WITH RECURSIVE t AS (
@@ -154,7 +154,7 @@ ORDER BY tree.path, t.span_id`,
 	{
 		Name:    "cost",
 		Help:    "what runs cost and the tokens they used, by model, as the runners reported it",
-		Since:   30 * 24 * time.Hour,
+		Since:   7 * 24 * time.Hour,
 		Signals: []string{store.Traces},
 		SQL: `
 SELECT coalesce(model, '(unknown)') AS model, count(*) AS runs,

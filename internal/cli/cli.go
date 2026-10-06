@@ -39,7 +39,7 @@ Usage:
   ynr info [--spool <root>] [--format text|json]
   ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>]
             [--collector-id <id>] [--collector-instance <id>] [--poll 1s]
-            [--max-line <bytes>] [--debug]
+            [--max-line <bytes>] [--hot-window 168h] [--debug]
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
             [--exit-on-stdin-eof]
@@ -54,7 +54,8 @@ ynr query with no name lists the named queries. It reads the store directly and 
 build, which includes DuckDB.
 
 ynr serve ships to a store, by default a folder on this machine, and optionally also forwards to
-an OTLP/HTTP endpoint. --store "" ships only to the upstream.
+an OTLP/HTTP endpoint. --store "" ships only to the upstream. In the full build it also keeps the
+store's recent records in a hot tier and answers ynr query from it.
 
 Environment fallbacks: YNR_SPOOL_ROOT, YNR_STORE, YNR_UPSTREAM, YNR_COLLECTOR_ID,
 YNR_COLLECTOR_INSTANCE, and YNR_SPOOL for the relay's folder.
@@ -203,6 +204,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	poll := fs.Duration("poll", time.Second, "how often to read the spool")
 	maxLine := fs.Int("max-line", spool.DefaultMaxLine, "longest line accepted, in bytes")
 	debug := fs.Bool("debug", false, "also print a summary of what is shipped")
+	hotWindow := fs.Duration("hot-window", 7*24*time.Hour, "how far back the hot tier holds records, for queries (full build only)")
 	ui := fs.String("ui", "", "serve the local dashboard on this address (full build only)")
 	if err := fs.Parse(args); err != nil {
 		return ExitUsage
@@ -223,6 +225,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		return ExitConfig
 	case *maxLine <= 0:
 		_, _ = fmt.Fprintln(stderr, "ynr: --max-line must be positive")
+		return ExitConfig
+	case *hotWindow <= 0:
+		_, _ = fmt.Fprintln(stderr, "ynr: --hot-window must be positive")
 		return ExitConfig
 	}
 	if *storeURL != "" {
@@ -250,6 +255,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		return ExitAdapter
 	}
 	defer lock.Release()
+	stopHot := startHot(ctx, *root, *storeURL, *hotWindow, *poll, stderr)
+	defer stopHot()
 	err = collector.Run(ctx, collector.Settings{
 		SpoolRoot:    *root,
 		PollInterval: *poll,
