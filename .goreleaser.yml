@@ -24,11 +24,29 @@ builds:
     goos: [darwin, linux]
     goarch: [amd64, arm64]
 
+  # The stub vendor (ADR-008): a deterministic stand-in for a vendor CLI, which a tool's CI puts
+  # on the PATH beside ynr for `ynr conformance`. Slim too: no cgo, no DuckDB.
+  - id: ynr-stub-vendor
+    main: ./cmd/ynr-stub-vendor
+    binary: ynr-stub-vendor
+    flags: [-trimpath]
+    ldflags: [-s -w]
+    env: [CGO_ENABLED=0, GOWORK=off]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+
 archives:
   - id: ynr
     ids: [ynr]
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+  - id: ynr-stub-vendor
+    ids: [ynr-stub-vendor]
+    formats: [tar.gz]
+    name_template: "ynr-stub-vendor_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
 
@@ -59,7 +77,8 @@ changelog:
     exclude: ["^docs:", "^test:", "^ci:"]
 
 brews:
-  - repository:
+  - ids: [ynr]
+    repository:
       owner: eyelock
       name: homebrew-tap
       token: "{{ .Env.GITHUB_TOKEN }}"

@@ -1,0 +1,4 @@
+file_format: definition_manifest/2.0
+name: fake
+description: A fake tool's names, for ynr conformance's own tests.
+schema_url: https://example.invalid/fake/0.1.0
