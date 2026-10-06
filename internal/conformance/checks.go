@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/eyelock/ynr/internal/registry"
 )
 
 // checker runs the rule checks for one scenario over the runs it made.
@@ -414,7 +416,7 @@ func (k *checker) rule8() {
 	limits := 0
 	if k.reg != nil {
 		for kk, vals := range distinct {
-			if limit := k.reg.Attributes[kk.attr]; limit > 0 {
+			if limit := k.reg.limit(kk.metric, kk.attr); limit > 0 {
 				limits++
 				if len(vals) > limit {
 					over = append(over, fmt.Sprintf("metric %q attribute %s has %d distinct values, over its registry limit of %d", kk.metric, kk.attr, len(vals), limit))
@@ -580,23 +582,6 @@ func (k *checker) rule14() {
 	k.pass(14, name, fmt.Sprintf("a ynr on the PATH was never started across %d runs", runs))
 }
 
-// registryJSON is the part of `<tool> telemetry registry --format json` the comparison needs.
-type registryJSON struct {
-	Attributes []struct {
-		ID string `json:"id"`
-	} `json:"attributes"`
-	Standard []string `json:"standard_attributes"`
-	Spans    []struct {
-		Name string `json:"name"`
-	} `json:"spans"`
-	Events []struct {
-		Name string `json:"name"`
-	} `json:"events"`
-	Metrics []struct {
-		Name string `json:"name"`
-	} `json:"metrics"`
-}
-
 // rule7: the names the tool wrote are ones its registry declares, and the registry it prints is
 // the one in its repository.
 func (k *checker) rule7() {
@@ -682,7 +667,7 @@ func (k *checker) registryPrinted() {
 		k.fail(7, name, fmt.Sprintf("`%s telemetry registry --format json` failed: %v", k.f.Service, err))
 		return
 	}
-	var j registryJSON
+	var j registry.Registry
 	if err := json.Unmarshal(out, &j); err != nil {
 		k.fail(7, name, fmt.Sprintf("`%s telemetry registry --format json` printed no registry JSON: %v", k.f.Service, err))
 		return
@@ -720,8 +705,8 @@ func (k *checker) registryPrinted() {
 	for _, m := range j.Metrics {
 		metrics = append(metrics, m.Name)
 	}
-	compare("attribute", attrs, sortedKeys(k.reg.Attributes))
-	compare("standard attribute", j.Standard, sortedKeys(k.reg.Refs))
+	compare("attribute", attrs, sortedKeys(k.reg.own))
+	compare("standard attribute", j.Standard, sortedKeys(k.reg.std))
 	compare("span", spans, sortedKeys(k.reg.Spans))
 	compare("event", events, sortedKeys(k.reg.Events))
 	compare("metric", metrics, sortedKeys(k.reg.Metrics))

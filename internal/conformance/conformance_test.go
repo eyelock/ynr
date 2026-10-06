@@ -64,7 +64,7 @@ func runFake(t *testing.T, breaks string) *Report {
 func runScenarios(t *testing.T, scenarios string, env map[string]string) *Report {
 	t.Helper()
 	rep, err := Run(context.Background(), Options{
-		File: conformanceFile(t, scenarios), Timeout: 20 * time.Second, KillWait: 4 * time.Second, Env: env,
+		File: conformanceFile(t, scenarios), Dir: t.TempDir(), Timeout: 20 * time.Second, KillWait: 4 * time.Second, Env: env,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -267,10 +267,44 @@ func TestLoadRegistry(t *testing.T) {
 	if !r.Spans["fake.run"] || !r.Events["fake.run.started"] || !r.Metrics["fake.run.count"] {
 		t.Errorf("registry: %+v", r)
 	}
-	if r.Attributes["fake.outcome"] != 5 || !r.declaresAttr("fake.run.outcome") {
-		t.Errorf("attributes: %+v", r.Attributes)
+	if r.limit("fake.run.count", "fake.outcome") != 5 || !r.declaresAttr("fake.run.outcome") {
+		t.Errorf("attributes: %+v, limits %+v", r.Attributes, r.limits)
 	}
 	if _, err := LoadRegistry(t.TempDir()); err == nil {
 		t.Error("an empty folder loaded")
+	}
+}
+
+// TestLoadRegistryIsTheServeLoader checks the loader is internal/registry's, by loading ynr's own
+// registry, which only that loader's rules (references, groups) accept.
+func TestLoadRegistryIsTheServeLoader(t *testing.T) {
+	r, err := LoadRegistry("../../telemetry/registry")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Tool != "ynr" || !r.declaresAttr("ynr.provenance") {
+		t.Errorf("ynr's registry: tool %q", r.Tool)
+	}
+}
+
+// TestRunsInTheInvokedFolder shows a scenario's command runs in the folder conformance was
+// invoked from, so repo-relative paths work, and that the folder is also in YNR_CONFORMANCE_ROOT.
+func TestRunsInTheInvokedFolder(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "marker.txt"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	scn := `  - name: run, converged
+    run: test -f marker.txt && test "$YNR_CONFORMANCE_ROOT" -ef . && fake run --task @canary:prompt
+    expect: { outcome: converged }
+`
+	rep, err := Run(context.Background(), Options{
+		File: conformanceFile(t, scn), Dir: dir, Timeout: 20 * time.Second, KillWait: 4 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.OK {
+		t.Fatalf("the scenario did not run in the invoked folder:\n%s", dump(rep))
 	}
 }

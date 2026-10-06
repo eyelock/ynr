@@ -221,6 +221,9 @@ func pointAttrs(m pmetric.Metric) []map[string]string {
 func strayFiles(dir string) []string {
 	var out []string
 	_ = filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() && (d.Name() == ".git" || d.Name() == "node_modules") {
+			return fs.SkipDir
+		}
 		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".jsonl") {
 			rel, _ := filepath.Rel(dir, p)
 			out = append(out, rel)

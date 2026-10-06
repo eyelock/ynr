@@ -14,7 +14,7 @@ type Options struct {
 	// File is the conformance file's path.
 	File string
 	// Dir is the folder it was invoked from: the registry path is relative to it, and
-	// scenarios find it in $YNR_CONFORMANCE_ROOT, since they run in a temporary folder.
+	// scenarios run with it as their working directory, and it is also in $YNR_CONFORMANCE_ROOT.
 	Dir string
 	// Timeout bounds one run of a scenario.
 	Timeout time.Duration

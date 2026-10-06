@@ -81,10 +81,12 @@ func (s *sandbox) execRun(ctx context.Context, kind, command string) (*runOutcom
 	spoolRoot := filepath.Join(dir, "spool")
 	writer := filepath.Join(spoolRoot, "services", s.service)
 	epRoot := filepath.Join(dir, "endpoint")
-	cwd := filepath.Join(dir, "cwd")
+	// The command runs where `ynr conformance` was invoked, so repo-relative paths in a scenario
+	// work; everything the harness itself keeps stays in the run folder.
+	cwd := s.invoked
 	bin := filepath.Join(dir, "bin")
 	state := filepath.Join(dir, "state")
-	for _, d := range []string{cwd, bin, state} {
+	for _, d := range []string{bin, state} {
 		if err := os.MkdirAll(d, 0o700); err != nil {
 			return nil, err
 		}
@@ -165,6 +167,7 @@ func (s *sandbox) execRun(ctx context.Context, kind, command string) (*runOutcom
 		return nil, fmt.Errorf("unknown run %q", kind)
 	}
 
+	before := toSet(strayFiles(cwd))
 	res := runCommand(ctx, command, cwd, mergeEnv(env), limit, until, filepath.Join(dir, "output.log"))
 	out.Exit, out.Duration, out.TimedOut, out.Killed, out.ExitedEarly, out.Output =
 		res.exit, res.duration, res.timedOut, res.killed, res.exitedEarly, res.output
@@ -183,6 +186,13 @@ func (s *sandbox) execRun(ctx context.Context, kind, command string) (*runOutcom
 		// wrote, and not the writer folder the harness made for the runs that name one.
 		if !strings.HasPrefix(p, "endpoint"+string(os.PathSeparator)) {
 			out.Stray = append(out.Stray, p)
+		}
+	}
+	// A command that writes spool files into its working directory, the repo, wrote them where
+	// it should not have.
+	for _, p := range strayFiles(cwd) {
+		if !before[p] {
+			out.Stray = append(out.Stray, filepath.Join(cwd, p))
 		}
 	}
 	if b, err := os.ReadFile(log); err == nil {
@@ -350,4 +360,12 @@ func startHung() (string, func() error, error) {
 		}
 		return nil
 	}, nil
+}
+
+func toSet(l []string) map[string]bool {
+	m := make(map[string]bool, len(l))
+	for _, x := range l {
+		m[x] = true
+	}
+	return m
 }
