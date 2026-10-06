@@ -43,6 +43,8 @@ its repository:
 service: ynh
 registry: telemetry/registry            # the tool's own Weaver registry (ADR-007)
 vendor: ynr-stub-vendor                 # deterministic; no model, no secrets
+vendor_aliases: [claude]                # optional: other names the stub answers to on PATH
+units: [ynh.run]                        # optional: span names that are units of work (rules 5, 11)
 scenarios:
   - name: agent run, converged
     run: ynh agent run --harness testdata/harness --task @canary:prompt
@@ -51,6 +53,12 @@ scenarios:
     run: ynh agent run --harness testdata/harness --max-turns 1 --task @canary:prompt
     expect: { outcome: budget }
 ```
+
+Each scenario's command runs from the repository root, the folder `ynr conformance` is run from, so
+paths such as `testdata/harness` work as written; its spool and scratch files are kept elsewhere.
+The stub vendor is first on `PATH` under its own name and each alias, so a tool that runs `claude`
+gets the stub. Without `units`, a unit of work is a span that is a direct child of the
+`TRACEPARENT` span, or one a `<unit>.started` event names.
 
 **No real model in CI.** `ynr conformance` ships a stub vendor CLI that follows a script: it
 answers turns, emits OTLP like a vendor CLI to the relay, honours `TRACEPARENT`, and exits with a
