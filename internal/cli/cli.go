@@ -38,6 +38,7 @@ const usage = `ynr: your named reporting
 Usage:
   ynr version
   ynr info [--spool <root>] [--format text|json]
+  ynr doctor [--spool <root>] [--store <url>] [--format text|json]
   ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>]
             [--collector-id <id>] [--collector-instance <id>] [--poll 1s]
             [--max-line <bytes>] [--spool-cap <bytes>] [--hot-window 168h] [--retain 168h] [--retain-bytes <bytes>]
@@ -92,6 +93,8 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return queryCmd(ctx, args[1:], stdout, stderr)
 	case "tail":
 		return tailCmd(ctx, args[1:], stdout, stderr)
+	case "doctor":
+		return doctor(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return ExitOK
