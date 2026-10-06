@@ -6,8 +6,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"net/url"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -151,11 +154,32 @@ func col(t *testing.T, res *Result, name string) int {
 	return -1
 }
 
+// openStore is a folder store, or, when YNR_TEST_S3 names a bucket (see the store package's
+// contract test), a fresh prefix in it, so every query test also runs against S3.
 func openStore(t *testing.T) store.Reader {
 	t.Helper()
-	r, err := store.OpenReader(store.FolderURL(t.TempDir()))
+	raw := store.FolderURL(t.TempDir())
+	if s3 := os.Getenv("YNR_TEST_S3"); s3 != "" {
+		u, err := url.Parse(s3)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var b [6]byte
+		_, _ = rand.Read(b[:])
+		u.Path = "/" + strings.Trim(u.Path, "/") + "/" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-")) + "-" + hex.EncodeToString(b[:])
+		q := u.Query()
+		q.Set("cache", t.TempDir())
+		u.RawQuery = q.Encode()
+		raw = u.String()
+	}
+	r, err := store.OpenReader(raw)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if s, ok := r.(*store.S3); ok {
+		if err := s.EnsureBucket(context.Background()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return r
 }

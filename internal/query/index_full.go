@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -33,9 +34,9 @@ func buildIndex(ctx context.Context, r store.Reader, day time.Time) error {
 			if h.Manifest == nil {
 				continue
 			}
-			var locs []string
-			for _, p := range h.Parts {
-				locs = append(locs, r.Location(p))
+			locs, err := local(ctx, r, h.Parts)
+			if err != nil {
+				return err
 			}
 			at := "TIMESTAMP " + literal(hour.UTC().Format("2006-01-02 15:04:05"))
 			data = append(data, fmt.Sprintf("SELECT item_key, step_id, trace_id, time, %s AS hour, %s AS signal FROM %s",
@@ -92,12 +93,16 @@ func itemFiles(ctx context.Context, r store.Reader, item string, hours []time.Ti
 			if h.Manifest != nil && len(h.Batches) == 0 && cover[k] == h.Manifest.N && !hits[k] {
 				continue
 			}
-			for _, p := range h.Parts {
-				f.Parts[sig] = append(f.Parts[sig], r.Location(p))
+			parts, err := local(ctx, r, h.Parts)
+			if err != nil {
+				return f, err
 			}
-			for _, b := range h.Batches {
-				f.Batches[sig] = append(f.Batches[sig], r.Location(b))
+			batches, err := local(ctx, r, h.Batches)
+			if err != nil {
+				return f, err
 			}
+			f.Parts[sig] = append(f.Parts[sig], parts...)
+			f.Batches[sig] = append(f.Batches[sig], batches...)
 		}
 	}
 	return f, nil
@@ -119,10 +124,12 @@ func readIndex(ctx context.Context, r store.Reader, item string, hours []time.Ti
 		if err != nil {
 			return nil, nil, err
 		}
-		for _, k := range keys {
-			if k == key {
-				locs = append(locs, r.Location(k))
+		if slices.Contains(keys, key) {
+			p, err := r.Local(ctx, key)
+			if err != nil {
+				return nil, nil, err
 			}
+			locs = append(locs, p)
 		}
 	}
 	if len(locs) == 0 {

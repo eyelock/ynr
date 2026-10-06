@@ -64,10 +64,15 @@ func rollMonth(ctx context.Context, r store.Reader, month time.Time) error {
 	var runs, metrics []string
 	for d := month; d.Month() == month.Month(); d = d.AddDate(0, 0, 1) {
 		for kind, list := range map[string]*[]string{store.RollupRuns: &runs, store.RollupMetrics: &metrics} {
-			if ok, err := exists(ctx, r, store.RollupKey(kind, store.Daily, d)); err != nil {
+			key := store.RollupKey(kind, store.Daily, d)
+			if ok, err := exists(ctx, r, key); err != nil {
 				return err
 			} else if ok {
-				*list = append(*list, r.Location(store.RollupKey(kind, store.Daily, d)))
+				p, err := r.Local(ctx, key)
+				if err != nil {
+					return err
+				}
+				*list = append(*list, p)
 			}
 		}
 	}
@@ -143,7 +148,11 @@ func rollupFiles(ctx context.Context, r store.Reader, kind string, since, until 
 				return nil, err
 			}
 			if ok {
-				out = append(out, r.Location(key))
+				p, err := r.Local(ctx, key)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, p)
 				d = next
 				continue
 			}
@@ -154,7 +163,11 @@ func rollupFiles(ctx context.Context, r store.Reader, kind string, since, until 
 			return nil, err
 		}
 		if ok {
-			out = append(out, r.Location(key))
+			p, err := r.Local(ctx, key)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, p)
 		}
 		d = d.AddDate(0, 0, 1)
 	}

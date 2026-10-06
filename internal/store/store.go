@@ -1,6 +1,6 @@
 // Package store is the object store port (ADR-005): where ynr serve ships batches and where the
-// reader of a store finds them. Configuration is a URL. The laptop adapter is a folder
-// (file:///…); S3 follows in the cloud slice.
+// reader of a store finds them. Configuration is a URL: a folder on a laptop (file:///…), or an
+// S3 bucket in the cloud (s3://bucket/prefix?region=…).
 package store
 
 import (
@@ -37,6 +37,8 @@ func Open(raw string) (Store, error) {
 			return nil, fmt.Errorf("store %q: the folder must be an absolute path", raw)
 		}
 		return &Folder{root: filepath.Clean(u.Path), raw: raw}, nil
+	case "s3":
+		return openS3(context.Background(), raw, u)
 	case "":
 		return nil, fmt.Errorf("store %q: give a URL such as file:///path/to/folder", raw)
 	}
@@ -131,8 +133,9 @@ type Reader interface {
 	// List returns the keys under a prefix that ends in '/', in key order. A prefix with nothing
 	// under it is empty, not an error.
 	List(ctx context.Context, prefix string) ([]string, error)
-	// Location is where DuckDB reads a key: a path for a folder, a URL for a bucket.
-	Location(key string) string
+	// Local returns a path on this machine holding the object, for DuckDB to read: the object
+	// itself for a folder, a cached copy for a bucket.
+	Local(ctx context.Context, key string) (string, error)
 	// Get reads a whole object. A missing one is an error that matches os.ErrNotExist.
 	Get(ctx context.Context, key string) ([]byte, error)
 	// Delete removes an object; one already gone is not an error.
@@ -187,6 +190,14 @@ func (f *Folder) List(_ context.Context, prefix string) ([]string, error) {
 		return nil, nil
 	}
 	return keys, err
+}
+
+// Local is the object's own path.
+func (f *Folder) Local(_ context.Context, key string) (string, error) {
+	if !ValidKey(key) {
+		return "", fmt.Errorf("store: invalid key %q", key)
+	}
+	return f.Location(key), nil
 }
 
 // Location is the object's path on this machine.

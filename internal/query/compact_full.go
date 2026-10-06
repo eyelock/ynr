@@ -144,13 +144,14 @@ func compactHour(ctx context.Context, r store.Reader, sig signal, hour time.Time
 	if h.Manifest != nil {
 		n = h.Manifest.N + 1
 		covered = append(covered, h.Manifest.Batches...)
-		for _, p := range h.Parts {
-			parts = append(parts, r.Location(p))
+		var err error
+		if parts, err = local(ctx, r, h.Parts); err != nil {
+			return err
 		}
 	}
-	var batches []string
-	for _, k := range h.Batches {
-		batches = append(batches, r.Location(k))
+	batches, err := local(ctx, r, h.Batches)
+	if err != nil {
+		return err
 	}
 	partKey := store.PartKey(sig.name, hour, n)
 
@@ -206,9 +207,9 @@ func holdsErased(ctx context.Context, r store.Reader, h *Hour) (bool, error) {
 	if h.Manifest == nil || len(Erasure()) == 0 {
 		return false, nil
 	}
-	var locs []string
-	for _, p := range h.Parts {
-		locs = append(locs, r.Location(p))
+	locs, err := local(ctx, r, h.Parts)
+	if err != nil {
+		return false, err
 	}
 	db, err := sql.Open("duckdb", "")
 	if err != nil {

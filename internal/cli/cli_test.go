@@ -70,7 +70,7 @@ func TestServeRefusals(t *testing.T) {
 	}{
 		{"ui", []string{"--spool", root, "--upstream", "http://x", "--ui", ":8080"}, ExitConfig, uiRefusal},
 		{"nowhere to ship", []string{"--spool", root, "--store", ""}, ExitConfig, "nowhere to ship"},
-		{"bad store", []string{"--spool", root, "--store", "s3://bucket"}, ExitConfig, "--store"},
+		{"bad store", []string{"--spool", root, "--store", "gs://bucket"}, ExitConfig, "--store"},
 		{"bad collector id", []string{"--spool", root, "--upstream", "http://x", "--collector-id", "Bad Id"}, ExitConfig, "collector-id"},
 	}
 	for _, c := range cases {
