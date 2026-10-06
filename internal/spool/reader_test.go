@@ -368,3 +368,43 @@ func TestFollowerWatchesWithoutDisturbing(t *testing.T) {
 		t.Fatalf("--from-start read %v", g)
 	}
 }
+
+// TestEvictOldestClosedFirst: over its cap, the spool loses its oldest closed files first and
+// counts them; open files and links are never touched.
+func TestEvictOldestClosedFirst(t *testing.T) {
+	root := setup(t)
+	dir := filepath.Join(root, "local")
+	old := time.Now().Add(-time.Hour)
+	for i, name := range []string{"a-1-000001.jsonl", "a-1-000002.jsonl", "a-1-000003.open.jsonl"} {
+		p := filepath.Join(dir, name)
+		writeFile(t, p, strings.Repeat("x", 100)+"\n")
+		at := old.Add(time.Duration(i) * time.Minute)
+		if err := os.Chtimes(p, at, at); err != nil {
+			t.Fatal(err)
+		}
+	}
+	target := filepath.Join(t.TempDir(), "host.jsonl")
+	writeFile(t, target, strings.Repeat("y", 1000)+"\n")
+	if err := os.Symlink(target, filepath.Join(dir, "z.jsonl")); err != nil {
+		t.Fatal(err)
+	}
+	r := newReader(t, root, 0)
+	if err := r.Evict(250); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]bool{"a-1-000001.jsonl": false, "a-1-000002.jsonl": true, "a-1-000003.open.jsonl": true, "z.jsonl": true} {
+		_, err := os.Lstat(filepath.Join(dir, name))
+		if (err == nil) != want {
+			t.Errorf("%s exists = %v, want %v", name, err == nil, want)
+		}
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatal("eviction followed a link")
+	}
+	if s := r.Counters.Snapshot(); s.Evicted != 1 || s.EvictedBytes != 101 {
+		t.Fatalf("counted %+v", s)
+	}
+	if err := r.Evict(0); err != nil || r.Counters.Evicted.Load() != 1 {
+		t.Fatal("a zero cap evicted")
+	}
+}
