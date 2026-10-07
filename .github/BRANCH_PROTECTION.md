@@ -18,7 +18,7 @@ fails for any source branch other than `develop`, `release/*` or `hotfix/*`.
 
 - Changes reach `develop` through a pull request (squash or merge commit; rebase is off)
 - All review conversations must be resolved; no approving review is required
-- All Clear must pass, and the branch must be up to date with `develop` before merging
+- All Clear must pass; the branch need not be up to date with `develop`
 - Force pushes blocked
 - Branch deletion blocked
 - Repository admins can bypass in emergencies
