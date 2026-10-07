@@ -15,7 +15,6 @@ when no server is running. Compaction and the dashboard follow.
 ## Install
 
 ```bash
-export HOMEBREW_GITHUB_API_TOKEN=<a token that can read eyelock/ynr>   # while ynr is private
 brew install eyelock/tap/ynr
 ```
 
@@ -53,13 +52,6 @@ OpenTelemetry SDK and on nothing else in ynr. ynr's tests read what both write.
 - **npm:** [`spoolexporter/js/`](spoolexporter/js), the package `@eyelock/otel-spool-exporter`,
   published to GitHub Packages by the same tags. Installing it needs an `.npmrc` with
   `@eyelock:registry=https://npm.pkg.github.com` and a token that can read packages.
-
-While this repository is private, fetching the Go module needs `GOPRIVATE=github.com/eyelock/ynr`
-and a token with read access:
-
-```bash
-git config --global url."https://x-access-token:${TOKEN}@github.com/eyelock/ynr".insteadOf "https://github.com/eyelock/ynr"
-```
 
 ## Develop
 
