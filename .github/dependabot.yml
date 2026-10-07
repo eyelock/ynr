@@ -1,0 +1,32 @@
+version: 2
+updates:
+  # Keep GitHub Actions up to date
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+
+  # Go modules: ynr, and the spool exporter module
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+
+  - package-ecosystem: "gomod"
+    directory: "/spoolexporter"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+
+  # The npm spool exporter
+  - package-ecosystem: "npm"
+    directory: "/spoolexporter/js"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
