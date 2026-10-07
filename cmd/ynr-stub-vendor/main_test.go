@@ -17,6 +17,9 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 )
 
+// nilIn is no stdin, as a vendor run with a prompt and no session.
+var nilIn = strings.NewReader("")
+
 const (
 	traceID = "0af7651916cd43dd8448eb211c80319c"
 	spanID  = "b7ad6b7169203331"
@@ -70,7 +73,7 @@ func TestExportsAndJoinsTrace(t *testing.T) {
 				env = append(env, "OTEL_EXPORTER_OTLP_PROTOCOL="+protocol)
 			}
 			var out, errb bytes.Buffer
-			code := run([]string{"--turns", "2", "--exit", "7", "--result", "budget", "-p", "SECRET PROMPT"}, env, &out, &errb)
+			code := run([]string{"--turns", "2", "--exit", "7", "--result", "budget", "-p", "SECRET PROMPT"}, env, nilIn, &out, &errb)
 			if code != 7 {
 				t.Fatalf("exit %d, want 7 (%s)", code, errb.String())
 			}
@@ -147,7 +150,7 @@ func TestExportsAndJoinsTrace(t *testing.T) {
 
 func TestNoEndpointExportsNothing(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := run([]string{"--turns", "1"}, []string{"TRACEPARENT=00-" + traceID + "-" + spanID + "-01"}, &out, &errb); code != 0 {
+	if code := run([]string{"--turns", "1"}, []string{"TRACEPARENT=00-" + traceID + "-" + spanID + "-01"}, nilIn, &out, &errb); code != 0 {
 		t.Fatalf("exit %d", code)
 	}
 }
@@ -156,12 +159,12 @@ func TestUnsupportedProtocolAndNoneExporter(t *testing.T) {
 	s, srv := newSink(t)
 	var out, errb bytes.Buffer
 	env := []string{"OTEL_EXPORTER_OTLP_ENDPOINT=" + srv.URL, "OTEL_EXPORTER_OTLP_PROTOCOL=grpc"}
-	run([]string{"--turns", "1"}, env, &out, &errb)
+	run([]string{"--turns", "1"}, env, nilIn, &out, &errb)
 	if s.count() != 0 {
 		t.Errorf("grpc is not spoken, yet %d requests arrived", s.count())
 	}
 	env = []string{"OTEL_EXPORTER_OTLP_ENDPOINT=" + srv.URL, "OTEL_LOGS_EXPORTER=none", "OTEL_METRICS_EXPORTER=none"}
-	run([]string{"--turns", "1"}, env, &out, &errb)
+	run([]string{"--turns", "1"}, env, nilIn, &out, &errb)
 	if s.count() != 1 || s.body("/v1/traces") == nil {
 		t.Errorf("only traces were wanted, got %d requests", s.count())
 	}
@@ -173,17 +176,17 @@ func TestScriptFileAndEnvironment(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	if code := run([]string{"--script", p}, nil, &out, &errb); code != 4 {
+	if code := run([]string{"--script", p}, nil, nilIn, &out, &errb); code != 4 {
 		t.Errorf("exit %d, want 4", code)
 	}
 	if strings.Count(out.String(), "turn ") != 3 || !strings.Contains(out.String(), "stuck") {
 		t.Errorf("output %q", out.String())
 	}
 	out.Reset()
-	if code := run(nil, []string{"YNR_STUB_TURNS=2", "YNR_STUB_EXIT=5", "YNR_STUB_TURN_DELAY=1ms"}, &out, &errb); code != 5 || strings.Count(out.String(), "turn ") != 2 {
+	if code := run(nil, []string{"YNR_STUB_TURNS=2", "YNR_STUB_EXIT=5", "YNR_STUB_TURN_DELAY=1ms"}, nilIn, &out, &errb); code != 5 || strings.Count(out.String(), "turn ") != 2 {
 		t.Errorf("environment script: exit %d, output %q", code, out.String())
 	}
-	if code := run([]string{"--script", "/no/such/file"}, nil, &out, &errb); code != 2 {
+	if code := run([]string{"--script", "/no/such/file"}, nil, nilIn, &out, &errb); code != 2 {
 		t.Errorf("missing script: exit %d", code)
 	}
 }
@@ -198,7 +201,7 @@ func TestHungEndpointCostsAboutASecond(t *testing.T) {
 	t.Cleanup(srv.Close)
 	start := time.Now()
 	var out, errb bytes.Buffer
-	code := run([]string{"--turns", "1", "--exit", "3"}, []string{"OTEL_EXPORTER_OTLP_ENDPOINT=" + srv.URL}, &out, &errb)
+	code := run([]string{"--turns", "1", "--exit", "3"}, []string{"OTEL_EXPORTER_OTLP_ENDPOINT=" + srv.URL}, nilIn, &out, &errb)
 	if code != 3 {
 		t.Errorf("exit %d, want 3", code)
 	}
