@@ -24,7 +24,7 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: spoolexporter/js/package-lock.json
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
           install-only: true
