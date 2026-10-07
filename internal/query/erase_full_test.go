@@ -109,9 +109,9 @@ func TestErasureMasksAtOnceThenRemoves(t *testing.T) {
 
 func TestLoadErasure(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "erase")
-	_ = os.WriteFile(p, []byte("# people who asked\ngithub.com/alice\n\n  acme.atlassian.net/jdoe  \n"), 0o600)
+	_ = os.WriteFile(p, []byte("# people who asked\ngithub.com/alice\n\n  example.atlassian.net/jdoe  \n"), 0o600)
 	got, err := LoadErasure(p)
-	if err != nil || len(got) != 2 || got[1] != "acme.atlassian.net/jdoe" {
+	if err != nil || len(got) != 2 || got[1] != "example.atlassian.net/jdoe" {
 		t.Fatalf("%v %v", got, err)
 	}
 	_ = os.WriteFile(p, []byte("Alice Smith\n"), 0o600)

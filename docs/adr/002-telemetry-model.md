@@ -45,13 +45,13 @@ links give its order.
 
 **Factory and place.** Every record of factory work carries the factory it belongs to: `ynf.lane`
 is the lane's id, where the lane is defined plus its name
-(`github.com/acme/factory-config#lint-paydown`, or `github.com/eyelock/ynh#docs-refresh` for a lane
+(`github.com/example-org/factory-config#lint-paydown`, or `github.com/eyelock/ynh#docs-refresh` for a lane
 a target repository defines itself). A lane may declare an explicit `id` that stays fixed if its
 repository moves. `ynf.lane.harness` and `ynf.lane.focus` are what the run actually used, so a
 target repository that overrides a lane shows up as a variant of the same factory. ynr stamps these
 on receipt from ynf's run manifest, so a run cannot claim another factory (ADR-003). Where the work
 happens is the repository in ynf's host-first form (`github.com/eyelock/ynh`,
-`github.acme.internal/acme/x`), using OpenTelemetry's `vcs.*` attributes, so one factory across
+`github.example.internal/example-org/x`), using OpenTelemetry's `vcs.*` attributes, so one factory across
 many repositories and forges is one series broken down by repository. Staging and production are
 told apart by `deployment.environment.name`.
 
@@ -64,7 +64,7 @@ development, so each tool's registry pins the semantic-conventions version it fo
 may change when it moves.
 
 **People appear by their handle,** never by name or email: the handle in the system where they
-acted, qualified by its host (`github.com/octocat`, `acme.atlassian.net/jdoe`, or the sign-in id
+acted, qualified by its host (`github.com/octocat`, `example.atlassian.net/jdoe`, or the sign-in id
 for ynm's audit events), in the standard `user.name` attribute, with the emitting tool's actor
 kind attribute saying human, bot or ynf. Handles are personal data (NFR-16): retention bounds
 them, the central dashboard requires sign-in, and an erasure list masks a handle in every query

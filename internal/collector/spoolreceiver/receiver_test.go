@@ -98,7 +98,7 @@ func resourceAttr(td ptrace.Traces, k string) string {
 
 func TestRunRecordsAreStampedFromFolderAndManifest(t *testing.T) {
 	root := spoolWith(t, map[string]string{
-		"manifests/r1.json":   `{"run":"r1","lane":"github.com/acme/cfg#lint","harness":"ynh-lint","focus":"tidy","item":"github.com/eyelock/ynh#77","step":"s3"}`,
+		"manifests/r1.json":   `{"run":"r1","lane":"github.com/example-org/cfg#lint","harness":"ynh-lint","focus":"tidy","item":"github.com/eyelock/ynh#77","step":"s3"}`,
 		"runs/r1/ynh-a.jsonl": traceLine + "\n" + logLine + "\nnot json\n",
 		"runs/r2/ynh-b.jsonl": traceLine + "\n",
 	})
@@ -114,7 +114,7 @@ func TestRunRecordsAreStampedFromFolderAndManifest(t *testing.T) {
 	r1, r2 := all[0], all[1]
 	for k, want := range map[string]string{
 		stamp.Provenance: "run", stamp.CollectorID: "gha-eyelock", stamp.CollectorInstance: "job-9",
-		stamp.Lane: "github.com/acme/cfg#lint", stamp.RunID: "r1", "service.name": "ynh",
+		stamp.Lane: "github.com/example-org/cfg#lint", stamp.RunID: "r1", "service.name": "ynh",
 	} {
 		if got := resourceAttr(r1, k); got != want {
 			t.Errorf("r1 %s = %q, want %q", k, got, want)

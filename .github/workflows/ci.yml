@@ -84,3 +84,22 @@ jobs:
           AWS_ACCESS_KEY_ID: ynrtest
           AWS_SECRET_ACCESS_KEY: ynrtestsecret
         run: go test -tags full -race ./internal/store ./internal/query
+
+  # The one check the branch rulesets require. It runs even when a job it needs failed (always()),
+  # because a skipped required check counts as passing.
+  all-clear:
+    name: All Clear
+    runs-on: ubuntu-latest
+    needs: [check, s3]
+    if: always()
+    steps:
+      - name: check results
+        env:
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          echo "$NEEDS"
+          if echo "$NEEDS" | grep -Eq '"result": "(failure|cancelled|skipped)"'; then
+            echo "One or more checks failed"
+            exit 1
+          fi
+          echo "All checks passed"

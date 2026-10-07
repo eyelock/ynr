@@ -31,14 +31,14 @@ func TestRunWithManifestOverwritesClaims(t *testing.T) {
 		Lane:           "github.com/x#other", // another factory
 		"service.name": "ynh",
 	})
-	m, ok := ParseManifest([]byte(`{"run":"r1","lane":"github.com/acme/cfg#lint","harness":"ynh-lint","focus":"tidy","item":"github.com/eyelock/ynh#77","step":"s3"}`), "r1")
+	m, ok := ParseManifest([]byte(`{"run":"r1","lane":"github.com/example-org/cfg#lint","harness":"ynh-lint","focus":"tidy","item":"github.com/eyelock/ynh#77","step":"s3"}`), "r1")
 	if !ok {
 		t.Fatal("manifest should parse")
 	}
 	Resource(a, spool.Writer{Class: spool.Run, Name: "r1"}, Identity{ID: "gha-eyelock", Instance: "job-9"}, m, "")
 	want := map[string]string{
 		Provenance: "run", CollectorID: "gha-eyelock", CollectorInstance: "job-9",
-		Lane: "github.com/acme/cfg#lint", LaneHarness: "ynh-lint", LaneFocus: "tidy",
+		Lane: "github.com/example-org/cfg#lint", LaneHarness: "ynh-lint", LaneFocus: "tidy",
 		ItemKey: "github.com/eyelock/ynh#77", StepID: "s3", RunID: "r1", "service.name": "ynh",
 	}
 	for k, v := range want {
@@ -66,12 +66,12 @@ func TestRunWithoutManifestCannotClaimAFactory(t *testing.T) {
 }
 
 func TestFactoryKeepsItsOwnAttributes(t *testing.T) {
-	a := attrs(map[string]string{Lane: "github.com/acme/cfg#lint", Provenance: "run"})
+	a := attrs(map[string]string{Lane: "github.com/example-org/cfg#lint", Provenance: "run"})
 	Resource(a, spool.Writer{Class: spool.Factory}, Identity{ID: "c"}, nil, "")
 	if v, _ := str(a, Provenance); v != "factory" {
 		t.Errorf("provenance = %q", v)
 	}
-	if v, _ := str(a, Lane); v != "github.com/acme/cfg#lint" {
+	if v, _ := str(a, Lane); v != "github.com/example-org/cfg#lint" {
 		t.Errorf("ynf's own lane attribute removed: %q", v)
 	}
 }

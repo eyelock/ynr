@@ -13,7 +13,7 @@ instances on many hosts.
 A **factory** is a ynf lane: an intake, a ynh harness and a focus (its prompt and profile), run
 by any number of ynf instances against any number of repositories on any number of forges. A
 factory's id is where its lane is defined plus the lane's name, for example
-`github.com/acme/factory-config#lint-paydown`.
+`github.com/example-org/factory-config#lint-paydown`.
 
 Each sibling logs on its own terms: ynh with Go's standard logger, ynf with `log/slog` and planned
 OpenTelemetry traces (ynf ADR-011), ynm through an audit seam with file, stdout and S3 sinks (ynm
