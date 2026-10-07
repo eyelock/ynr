@@ -57,8 +57,9 @@ one hour's prefix rather than every collector's:
 <root>/<signal>/<yyyy>/<mm>/<dd>/<hh>/<collector id>/<ship ulid>_<source>-<from>-<to>.jsonl.gz
 <root>/compacted/<signal>/<yyyy>/<mm>/<dd>/<hh>/part-<n>.parquet           compacted
 <root>/compacted/<signal>/<yyyy>/<mm>/<dd>/<hh>/_manifest-<n>.json
-<root>/rollups/metrics/<daily|monthly>/<period>.parquet                    metric rollups
+<root>/rollups/<metrics|runs>/<daily|monthly>/<period>.parquet             rollups
 <root>/index/items/<yyyy>/<mm>/<dd>.parquet                               item index, daily
+<root>/leases/compaction/<signal>/<yyyy>/<mm>/<dd>/<hh>.json                compaction leases
 <root>/registries/<collector id>/<tool>/<version>/<sha256>.json           ADR-007
 ```
 
@@ -70,7 +71,8 @@ end plus a slack (1 hour, default).
 a pattern such as `*/<collector>/*` would also match keys under `compacted/`, `index/` and other
 collectors' registries. Each collector's role therefore allows writes anchored per prefix
 (`traces/*/<id>/*`, `logs/*/<id>/*`, `metrics/*/<id>/*` and `registries/<id>/*`) and explicitly
-denies writes to `compacted/*`, `rollups/*` and `index/*`, which only central's role may write.
+denies writes to `compacted/*`, `rollups/*`, `index/*` and `leases/*`, which only central's role
+may write.
 Because a policy still cannot fix a key's depth, the reader accepts only keys of the exact shape
 above under every prefix it reads, batches, registries, compacted parts, rollups and the index
 alike: fixed depth, valid date and hour segments, a well-formed collector id. Anything else is
@@ -114,9 +116,12 @@ so the reader's hot tier holds all of it, rebuilt on restart from one index file
 "What happened to this ticket" asks the hot tier which hours and traces are involved, then reads
 only those hours, never a scan of the whole retention window.
 
-**Metric rollups.** Compaction also writes daily and monthly aggregates of every metric, by its
-attributes. Long-range views, such as cost by model this year, read the rollups. Hourly metric
-detail is kept for 30 days and the rollups for 13 months (NFR-15).
+**Rollups.** Compaction also writes daily and monthly aggregates of every metric, by its
+attributes, and of every run, from its run span (`ynh.run`), by lane, model, outcome, harness and
+repository: the runners report a run's cost and tokens on its span. A day is rolled up by the
+hours it was received in, so a record is counted on exactly one day. Long-range views, such as
+cost by model this year, read the rollups in whole days and months. Hourly metric detail is kept
+for 30 days and the rollups for 13 months (NFR-15).
 
 **Retention** is per signal (NFR-15): lifecycle rules on each signal's prefixes for S3, and
 deletion by age and total size for a folder.
@@ -165,8 +170,8 @@ loopback. The central dashboard requires sign-in, implementing ynm ADR-017's OID
 **Infrastructure.** ynr ships Terraform per cloud adapter, starting with `infra/aws`: a bucket with
 public access blocked, encryption on and lifecycle rules per signal; one IAM role per collector,
 with writes anchored per prefix and explicit denies as above, and a noncurrent-version expiry rule
-if versioning is on; a central role that reads everything and writes only `compacted/`, `rollups/`
-and `index/`. It follows the shape of ynm's existing buckets.
+if versioning is on; a central role that reads everything and writes only `compacted/`, `rollups/`,
+`index/` and `leases/`, and deletes the batches compaction has covered. It follows the shape of ynm's existing buckets.
 
 ## Alternatives
 

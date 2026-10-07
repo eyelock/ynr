@@ -32,7 +32,9 @@ applies. The resource's `schema_url` is left to the SDK, which uses it for the u
 conventions version.
 
 **ynr learns registries only from binaries its configuration names.** ynr's configuration lists
-the tools to ask (`ynh`, `ynf`, `ynm`, each by name on the path or by full path). `ynr serve` asks
+the tools to ask (`ynh`, `ynf`, `ynm`), each by its bare name on the shell's `PATH`, as every YN
+tool finds every other one: what is installed, and which copy, is decided by `PATH`, never by
+ynr's configuration. `ynr serve` asks
 each once at startup, and again only when its configuration is reloaded. Nothing in a record ever
 causes ynr to run a program or fetch a URL. A record whose tool and version have no learned
 registry is kept, with its registry marked unknown.

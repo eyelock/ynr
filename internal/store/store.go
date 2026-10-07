@@ -1,18 +1,26 @@
 // Package store is the object store port (ADR-005): where ynr serve ships batches and where the
-// reader of a store finds them. Configuration is a URL. The laptop adapter is a folder
-// (file:///…); S3 follows in the cloud slice.
+// reader of a store finds them. Configuration is a URL: a folder on a laptop (file:///…), or an
+// S3 bucket in the cloud (s3://bucket/prefix?region=…).
 package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+	"syscall"
+	"time"
 )
+
+// ErrChanged is what ReplaceIf returns when the object is no longer the version the caller read.
+var ErrChanged = errors.New("store: the object changed since it was read")
 
 // Store holds objects by key. Keys use '/' and are relative.
 type Store interface {
@@ -37,6 +45,8 @@ func Open(raw string) (Store, error) {
 			return nil, fmt.Errorf("store %q: the folder must be an absolute path", raw)
 		}
 		return &Folder{root: filepath.Clean(u.Path), raw: raw}, nil
+	case "s3":
+		return openS3(context.Background(), raw, u)
 	case "":
 		return nil, fmt.Errorf("store %q: give a URL such as file:///path/to/folder", raw)
 	}
@@ -75,7 +85,11 @@ func (f *Folder) URL() string { return f.raw }
 
 // Put writes the object to a temporary file beside it, flushes it, and renames it into place, so
 // a reader never sees part of an object.
-func (f *Folder) Put(_ context.Context, key string, data []byte) (err error) {
+func (f *Folder) Put(_ context.Context, key string, data []byte) error {
+	return f.write(key, data, false)
+}
+
+func (f *Folder) write(key string, data []byte, replace bool) (err error) {
 	if !ValidKey(key) {
 		return fmt.Errorf("store: invalid key %q", key)
 	}
@@ -107,8 +121,229 @@ func (f *Folder) Put(_ context.Context, key string, data []byte) (err error) {
 	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
 		return err
 	}
-	if _, err := os.Lstat(path); err == nil {
-		return errors.Join(os.ErrExist, fmt.Errorf("store: %s already exists", key))
+	if !replace {
+		// A hard link fails if the name exists, atomically, so two processes putting the same
+		// key never both succeed (leases depend on it).
+		if err := os.Link(tmp.Name(), path); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				err = errors.Join(os.ErrExist, fmt.Errorf("store: %s already exists", key))
+			}
+			return err
+		}
+		return os.Remove(tmp.Name())
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// Replace writes the object as Put does, replacing any already there.
+func (f *Folder) Replace(_ context.Context, key string, data []byte) error {
+	return f.write(key, data, true)
+}
+
+// Reader lists a store's objects and says where DuckDB can read each one. Adapters provide only
+// this file access; the queries are the same over every adapter (ADR-005).
+type Reader interface {
+	Store
+	// List returns the keys under a prefix that ends in '/', in key order. A prefix with nothing
+	// under it is empty, not an error.
+	List(ctx context.Context, prefix string) ([]string, error)
+	// Local returns a path on this machine holding the object, for DuckDB to read: the object
+	// itself for a folder, a cached copy for a bucket.
+	Local(ctx context.Context, key string) (string, error)
+	// Get reads a whole object. A missing one is an error that matches os.ErrNotExist.
+	Get(ctx context.Context, key string) ([]byte, error)
+	// Delete removes an object; one already gone is not an error.
+	Delete(ctx context.Context, key string) error
+	// Replace writes an object whole, replacing any already there: for what only the store's
+	// reader writes, such as the item index, never for batches.
+	Replace(ctx context.Context, key string, data []byte) error
+	// GetWithTag is Get that also returns the object's version tag (an S3 ETag; for a folder, a
+	// hash of the content), for ReplaceIf.
+	GetWithTag(ctx context.Context, key string) (data []byte, tag string, err error)
+	// ReplaceIf replaces an object only if it still has the tag GetWithTag returned, so of two
+	// writers that read the same version only one wins. A changed object is an error matching
+	// ErrChanged, a missing one os.ErrNotExist.
+	ReplaceIf(ctx context.Context, key string, data []byte, tag string) error
+	// ListCollectors returns the collector ids that have shipped a signal's batches in an hour,
+	// sorted: one listing of the hour's prefix by '/', not of every key (the change feed).
+	ListCollectors(ctx context.Context, signal string, hour time.Time) ([]string, error)
+	// ListAfter is List limited to the keys that sort after a key, so a poller reads only what
+	// is new. An empty after lists everything under the prefix.
+	ListAfter(ctx context.Context, prefix, after string) ([]string, error)
+	// Sizes is List with each object's size in bytes, for retention by total size.
+	Sizes(ctx context.Context, prefix string) (map[string]int64, error)
+}
+
+// OpenReader opens a store for reading from its URL.
+func OpenReader(raw string) (Reader, error) {
+	s, err := Open(raw)
+	if err != nil {
+		return nil, err
+	}
+	r, ok := s.(Reader)
+	if !ok {
+		return nil, fmt.Errorf("store %q: this adapter cannot be read yet", raw)
+	}
+	return r, nil
+}
+
+// List walks the folder under prefix. Temporary files from a Put in progress are skipped.
+func (f *Folder) List(_ context.Context, prefix string) ([]string, error) {
+	if prefix != "" && (!strings.HasSuffix(prefix, "/") || !ValidKey(strings.TrimSuffix(prefix, "/"))) {
+		return nil, fmt.Errorf("store: invalid prefix %q", prefix)
+	}
+	base := filepath.Join(f.root, filepath.FromSlash(prefix))
+	var keys []string
+	err := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return filepath.SkipDir
+			}
+			return err
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(f.root, path)
+		if err != nil {
+			return err
+		}
+		if key := filepath.ToSlash(rel); ValidKey(key) && !strings.HasPrefix(d.Name(), ".") {
+			keys = append(keys, key)
+		}
+		return nil
+	})
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	return keys, err
+}
+
+// Local is the object's own path.
+func (f *Folder) Local(_ context.Context, key string) (string, error) {
+	if !ValidKey(key) {
+		return "", fmt.Errorf("store: invalid key %q", key)
+	}
+	return f.Location(key), nil
+}
+
+// Location is the object's path on this machine.
+func (f *Folder) Location(key string) string {
+	return filepath.Join(f.root, filepath.FromSlash(key))
+}
+
+// Get reads the object.
+func (f *Folder) Get(ctx context.Context, key string) ([]byte, error) {
+	b, _, err := f.GetWithTag(ctx, key)
+	return b, err
+}
+
+func folderTag(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
+// GetWithTag reads the object and returns a hash of it as its tag.
+func (f *Folder) GetWithTag(_ context.Context, key string) ([]byte, string, error) {
+	if !ValidKey(key) {
+		return nil, "", fmt.Errorf("store: invalid key %q", key)
+	}
+	b, err := os.ReadFile(f.Location(key))
+	if err != nil {
+		return nil, "", err
+	}
+	return b, folderTag(b), nil
+}
+
+// ReplaceIf checks the tag and replaces the object while holding an exclusive lock on a lock
+// file beside it, so it is safe across processes. Every ReplaceIf of a key takes the same lock.
+func (f *Folder) ReplaceIf(_ context.Context, key string, data []byte, tag string) (err error) {
+	if !ValidKey(key) {
+		return fmt.Errorf("store: invalid key %q", key)
+	}
+	path := f.Location(key)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	lock, err := os.OpenFile(filepath.Join(filepath.Dir(path), ".lock-"+filepath.Base(path)), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = lock.Close() }() // closing releases the lock
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX); err != nil {
+		return err
+	}
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if folderTag(cur) != tag {
+		return errors.Join(ErrChanged, fmt.Errorf("store: %s", key))
+	}
+	return f.write(key, data, true)
+}
+
+// ListCollectors reads the hour's folder.
+func (f *Folder) ListCollectors(_ context.Context, signal string, hour time.Time) ([]string, error) {
+	h := hour.UTC()
+	dir := filepath.Join(f.root, signal, fmt.Sprintf("%04d", h.Year()), fmt.Sprintf("%02d", int(h.Month())),
+		fmt.Sprintf("%02d", h.Day()), fmt.Sprintf("%02d", h.Hour()))
+	ents, err := os.ReadDir(dir)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range ents {
+		if e.IsDir() && ValidKey(e.Name()) {
+			out = append(out, e.Name())
+		}
+	}
+	return out, nil
+}
+
+// ListAfter lists the folder under prefix and keeps the keys after the given one.
+func (f *Folder) ListAfter(ctx context.Context, prefix, after string) ([]string, error) {
+	keys, err := f.List(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	i := sort.SearchStrings(keys, after)
+	for i < len(keys) && keys[i] <= after {
+		i++
+	}
+	return keys[i:], nil
+}
+
+// Delete removes the object.
+func (f *Folder) Delete(_ context.Context, key string) error {
+	if !ValidKey(key) {
+		return fmt.Errorf("store: invalid key %q", key)
+	}
+	if err := os.Remove(f.Location(key)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// Sizes lists the folder under prefix with each object's size.
+func (f *Folder) Sizes(ctx context.Context, prefix string) (map[string]int64, error) {
+	keys, err := f.List(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int64, len(keys))
+	for _, k := range keys {
+		fi, err := os.Lstat(f.Location(k))
+		if errors.Is(err, os.ErrNotExist) {
+			continue // removed since it was listed
+		}
+		if err != nil {
+			return nil, err
+		}
+		out[k] = fi.Size()
+	}
+	return out, nil
 }

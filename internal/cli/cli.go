@@ -9,9 +9,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,22 +39,61 @@ const usage = `ynr: your named reporting
 Usage:
   ynr version
   ynr info [--spool <root>] [--format text|json]
+  ynr doctor [--spool <root>] [--store <url>] [--format text|json]
   ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>]
             [--collector-id <id>] [--collector-instance <id>] [--poll 1s]
-            [--max-line <bytes>] [--debug]
+            [--max-line <bytes>] [--spool-cap <bytes>] [--hot-window 168h] [--retain 168h] [--retain-bytes <bytes>]
+            [--erase <file>] [--ui 127.0.0.1:4319] [--registry-tools ynh,ynf,ynm] [--debug]
+  ynr central --store <url> [--hot-window 6h] [--socket <path>] [--state <folder>] [--poll 5s]
+            [--compact-lookback 24h] [--compact-every 5m] [--erase <file>]
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
             [--exit-on-stdin-eof]
+  ynr telemetry registry [--format text|json]
+  ynr conformance [--file .ynr/conformance.yaml] [--format text|json] [--timeout 60s]
+            [--flush-limit 2s] [--keep]
+  ynr tail [--spool <root>] [--service <name>] [--item <key>] [--from-start] [--format text|json]
+  ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>]
+            [--format text|json] [--socket <path>]]
+
+ynr central reads a shared store, such as a bucket the collectors ship to: it keeps the last 6
+hours in a hot tier fed by polling each collector's new files, compacts closed hours under a
+lease in the store so two centrals never compact one hour together, and answers ynr query on a
+Unix socket (--socket on ynr query). It needs the full build, holds nothing that cannot be
+rebuilt from the store, and leaves a bucket's retention to its lifecycle rules. The dashboard
+(--ui) is refused until sign-in is built.
 
 ynr relay prints its OTLP/HTTP endpoint as its first line of output, then runs until it is
 stopped (Ctrl-C, SIGTERM, or with --exit-on-stdin-eof its standard input closing), flushing what
 it received into the folder.
 
+ynr conformance runs the scenarios in a tool's conformance file against a temporary spool and a
+local test endpoint, and checks the instrumentation contract (ADR-006, ADR-008). It exits 1 if any
+check fails, and with --format json prints the full report. The stub vendor and the tool under
+test are found by bare name on the PATH.
+
+ynr tail follows what tools write to the spool as it is written, until Ctrl-C. It only watches:
+ynr serve still ships everything.
+
+ynr telemetry registry prints the names ynr itself writes, as every YN tool prints its own.
+
+ynr query with no name lists the named queries. It reads the store directly and needs the full
+build, which includes DuckDB.
+
 ynr serve ships to a store, by default a folder on this machine, and optionally also forwards to
-an OTLP/HTTP endpoint. --store "" ships only to the upstream.
+an OTLP/HTTP endpoint. --store "" ships only to the upstream. In the full build it also keeps the
+store's recent records in a hot tier and answers ynr query from it. A folder store keeps records
+7 days and at most 1 GiB, and rollups 13 months. Handles listed in --erase read as (erased)
+everywhere, and are removed from the store at the next compaction.
+
+--registry-tools names the tools whose telemetry registries ynr learns at startup, each by its
+bare name on the PATH, by running: <tool> telemetry registry --format json. A tool that is
+missing or fails is logged and skipped. Records whose service and version have no learned
+registry are kept and marked ynr.registry=unknown; names a learned registry does not declare are
+counted, never rejected. With none named (the default) ynr learns nothing and checks nothing.
 
 Environment fallbacks: YNR_SPOOL_ROOT, YNR_STORE, YNR_UPSTREAM, YNR_COLLECTOR_ID,
-YNR_COLLECTOR_INSTANCE, and YNR_SPOOL for the relay's folder.
+YNR_COLLECTOR_INSTANCE, YNR_REGISTRY_TOOLS, and YNR_SPOOL for the relay's folder.
 `
 
 // stdin is the relay's standard input, replaced in tests.
@@ -72,8 +113,20 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return info(args[1:], stdout, stderr)
 	case "serve":
 		return serve(ctx, args[1:], stderr)
+	case "central":
+		return centralCmd(ctx, args[1:], stderr)
 	case "relay":
 		return relayCmd(ctx, args[1:], stdin, stdout, stderr)
+	case "query":
+		return queryCmd(ctx, args[1:], stdout, stderr)
+	case "telemetry":
+		return telemetryCmd(args[1:], stdout, stderr)
+	case "conformance":
+		return conformanceCmd(ctx, args[1:], stdout, stderr)
+	case "tail":
+		return tailCmd(ctx, args[1:], stdout, stderr)
+	case "doctor":
+		return doctor(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		_, _ = fmt.Fprint(stdout, usage)
 		return ExitOK
@@ -196,11 +249,17 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	poll := fs.Duration("poll", time.Second, "how often to read the spool")
 	maxLine := fs.Int("max-line", spool.DefaultMaxLine, "longest line accepted, in bytes")
 	debug := fs.Bool("debug", false, "also print a summary of what is shipped")
-	ui := fs.String("ui", "", "serve the local dashboard on this address (full build only)")
+	hotWindow := fs.Duration("hot-window", 7*24*time.Hour, "how far back the hot tier holds records, for queries (full build only)")
+	spoolCap := fs.Int64("spool-cap", 1<<30, "the most the spool may hold, in bytes; over it the oldest closed files are evicted and counted")
+	retain := fs.Duration("retain", store.LaptopRetention.Records, "how long a folder store keeps records; rollups are kept 13 months")
+	retainBytes := fs.Int64("retain-bytes", store.LaptopRetention.MaxBytes, "the most a folder store's records may take, in bytes; the oldest go first (0: no cap)")
+	erase := fs.String("erase", env("YNR_ERASE", ""), "a file of handles to erase, one per line (YNR_ERASE)")
+	ui := fs.String("ui", env("YNR_UI", ""), "serve the local dashboard on this loopback address, such as 127.0.0.1:4319 (full build only) (YNR_UI)")
+	registryTools := fs.String("registry-tools", env("YNR_REGISTRY_TOOLS", ""), "tools whose telemetry registries to learn at startup, by bare name on the PATH, comma separated, such as ynh,ynf,ynm (YNR_REGISTRY_TOOLS)")
 	if err := fs.Parse(args); err != nil {
 		return ExitUsage
 	}
-	if *ui != "" {
+	if *ui != "" && ynr.Build != "full" {
 		_, _ = fmt.Fprintf(stderr, "ynr: this %s build has no dashboard; --ui needs the full build\n", ynr.Build)
 		return ExitConfig
 	}
@@ -217,6 +276,18 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	case *maxLine <= 0:
 		_, _ = fmt.Fprintln(stderr, "ynr: --max-line must be positive")
 		return ExitConfig
+	case *hotWindow <= 0:
+		_, _ = fmt.Fprintln(stderr, "ynr: --hot-window must be positive")
+		return ExitConfig
+	case *spoolCap <= 0:
+		_, _ = fmt.Fprintln(stderr, "ynr: --spool-cap must be positive")
+		return ExitConfig
+	case *retain <= 0 || *retainBytes < 0:
+		_, _ = fmt.Fprintln(stderr, "ynr: --retain must be positive and --retain-bytes not negative")
+		return ExitConfig
+	}
+	if code := loadErasure(*erase, stderr); code != ExitOK {
+		return code
 	}
 	if *storeURL != "" {
 		if _, err := store.Open(*storeURL); err != nil {
@@ -243,14 +314,33 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		return ExitAdapter
 	}
 	defer lock.Release()
+	var uiLn net.Listener
+	if *ui != "" {
+		if uiLn, err = listenLoopback(*ui); err != nil {
+			_, _ = fmt.Fprintf(stderr, "ynr: --ui: %v\n", err)
+			return ExitConfig
+		}
+		if *storeURL == "" {
+			_ = uiLn.Close()
+			_, _ = fmt.Fprintln(stderr, "ynr: --ui needs a store to read: set --store")
+			return ExitConfig
+		}
+		_, _ = fmt.Fprintf(stderr, "ynr: dashboard at http://%s/\n", uiLn.Addr())
+	}
+	stopHot := startHot(ctx, *root, *storeURL, *hotWindow, *poll, uiLn, stderr)
+	defer stopHot()
+	stopRetain := startRetention(ctx, *storeURL, store.Retention{Records: *retain, Rollups: store.LaptopRetention.Rollups, MaxBytes: *retainBytes}, stderr)
+	defer stopRetain()
 	err = collector.Run(ctx, collector.Settings{
-		SpoolRoot:    *root,
-		PollInterval: *poll,
-		MaxLine:      *maxLine,
-		Identity:     stamp.Identity{ID: *id, Instance: *instance},
-		Store:        *storeURL,
-		Upstream:     *upstream,
-		Debug:        *debug,
+		SpoolRoot:     *root,
+		PollInterval:  *poll,
+		MaxLine:       *maxLine,
+		Identity:      stamp.Identity{ID: *id, Instance: *instance},
+		Store:         *storeURL,
+		SpoolCap:      *spoolCap,
+		RegistryTools: splitList(*registryTools),
+		Upstream:      *upstream,
+		Debug:         *debug,
 	})
 	if err != nil && ctx.Err() == nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
@@ -322,4 +412,15 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return ExitAdapter
 	}
 	return ExitOK
+}
+
+// splitList splits a comma separated list, dropping blanks and repeats.
+func splitList(s string) []string {
+	var out []string
+	for _, f := range strings.Split(s, ",") {
+		if f = strings.TrimSpace(f); f != "" && !slices.Contains(out, f) {
+			out = append(out, f)
+		}
+	}
+	return out
 }

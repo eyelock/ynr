@@ -33,8 +33,12 @@ func loadPositions(root string) (*positions, error) {
 	return p, nil
 }
 
-// save writes the positions atomically: a temporary file renamed over the old one.
+// save writes the positions atomically: a temporary file renamed over the old one. A follower's
+// positions have no path and are never saved.
 func (p *positions) save() error {
+	if p.path == "" {
+		return nil
+	}
 	b, err := json.Marshal(p)
 	if err != nil {
 		return err

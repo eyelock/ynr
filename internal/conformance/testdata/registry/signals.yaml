@@ -1,0 +1,41 @@
+groups:
+  - id: registry.fake
+    type: attribute_group
+    brief: Attributes the fake tool sets.
+    attributes:
+      - id: fake.run.outcome
+        type: string
+        brief: How the run ended.
+        examples: ["converged"]
+      - id: fake.task_len
+        type: int
+        brief: The length of the task, never the task.
+      - id: fake.outcome
+        type: string
+        brief: The outcome, on a metric.
+        examples: ["converged"]
+        annotations:
+          ynr.cardinality: 5
+  - id: span.fake.run
+    type: span
+    span_kind: internal
+    brief: One run, the unit of work.
+    attributes:
+      - {ref: fake.run.outcome, requirement_level: required}
+      - {ref: fake.task_len, requirement_level: recommended}
+  - id: span.fake.git
+    type: span
+    span_kind: client
+    brief: A call out to git.
+  - id: event.fake.run.started
+    type: event
+    name: fake.run.started
+    brief: A run began.
+  - id: metric.fake.run.count
+    type: metric
+    metric_name: fake.run.count
+    instrument: counter
+    unit: "{run}"
+    brief: Runs by outcome.
+    attributes:
+      - {ref: fake.outcome, requirement_level: required}

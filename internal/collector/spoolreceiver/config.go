@@ -10,6 +10,9 @@ import (
 	"go.opentelemetry.io/collector/component"
 )
 
+// DefaultSpoolCap is a laptop spool's cap, 1 GiB (ADR-004).
+const DefaultSpoolCap = 1 << 30
+
 // Type is the receiver's name in configuration.
 var Type = component.MustNewType("ynrspool")
 
@@ -33,10 +36,16 @@ type Config struct {
 	// or this large, whichever comes first.
 	ShipAge   time.Duration `mapstructure:"ship_age"`
 	ShipBytes int64         `mapstructure:"ship_bytes"`
+	// SpoolCap caps the whole spool in bytes (ADR-004); over it, the oldest closed files are
+	// evicted and counted. Zero is no cap.
+	SpoolCap int64 `mapstructure:"spool_cap"`
+	// RegistryTools are the tools to ask for their telemetry registries at startup, each by bare
+	// name on the PATH (ADR-007). Empty learns nothing, and then no record is checked or marked.
+	RegistryTools []string `mapstructure:"registry_tools"`
 }
 
 func createDefaultConfig() component.Config {
-	return &Config{PollInterval: time.Second, ShipAge: 15 * time.Second, ShipBytes: 16 << 20}
+	return &Config{PollInterval: time.Second, ShipAge: 15 * time.Second, ShipBytes: 16 << 20, SpoolCap: DefaultSpoolCap}
 }
 
 // Validate checks the configuration.

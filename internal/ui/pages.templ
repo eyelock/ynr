@@ -1,0 +1,271 @@
+package ui
+
+import (
+	"fmt"
+	"net/url"
+	"time"
+
+	"github.com/eyelock/ynr/internal/tail"
+)
+
+templ layout(title, active string) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title } · ynr</title>
+			<link rel="stylesheet" href="/static/app.css"/>
+			<script src="/static/htmx.min.js" defer></script>
+			<script src="/static/sse.min.js" defer></script>
+			<script src="/static/echarts.min.js" defer></script>
+			<script src="/static/app.js" defer></script>
+		</head>
+		<body>
+			<header>
+				<a class="brand" href="/">ynr</a>
+				<nav>
+					@navLink("/", "Lanes", active)
+					@navLink("/items", "Items", active)
+					@navLink("/tail", "Live tail", active)
+				</nav>
+				if user(ctx) != "" {
+					<form class="signout" action="/auth/logout" method="post">
+						<span class="who">{ user(ctx) }</span>
+						<button type="submit">Sign out</button>
+					</form>
+				}
+			</header>
+			<main>
+				{ children... }
+			</main>
+		</body>
+	</html>
+}
+
+templ navLink(href, label, active string) {
+	if label == active {
+		<a href={ templ.SafeURL(href) } aria-current="page">{ label }</a>
+	} else {
+		<a href={ templ.SafeURL(href) }>{ label }</a>
+	}
+}
+
+templ windowPicker(path, since string, extra url.Values) {
+	<div class="windows" role="group" aria-label="Window">
+		for _, w := range windows {
+			if w == since {
+				<span class="on">{ w }</span>
+			} else {
+				<a href={ templ.SafeURL(withSince(path, w, extra)) }>{ w }</a>
+			}
+		}
+	</div>
+}
+
+func withSince(path, since string, extra url.Values) string {
+	v := url.Values{}
+	for k, vs := range extra {
+		v[k] = vs
+	}
+	v.Set("since", since)
+	return path + "?" + v.Encode()
+}
+
+templ dataTable(t Table, empty string) {
+	if len(t.Rows) == 0 {
+		<p class="empty">{ empty }</p>
+	} else {
+		<div class="scroll">
+			<table>
+				<thead>
+					<tr>
+						for _, c := range t.Columns {
+							<th>{ c }</th>
+						}
+					</tr>
+				</thead>
+				<tbody>
+					for _, row := range t.Rows {
+						<tr>
+							for _, c := range row {
+								<td class={ c.Class }>
+									if c.Href != "" {
+										<a href={ templ.SafeURL(c.Href) }>{ c.Text }</a>
+									} else {
+										{ c.Text }
+									}
+								</td>
+							}
+						</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ lanesPage(p Lanes) {
+	@layout("Lanes", "Lanes") {
+		<div class="title">
+			<h1>Lanes</h1>
+			@windowPicker("/", p.Since, nil)
+		</div>
+		if len(p.Lanes) == 0 {
+			<p class="empty">No runs in the last { p.Since }. Runs appear here once ynh agent run reports through ynr.</p>
+		} else {
+			<section class="cards">
+				for _, l := range p.Lanes {
+					<article class="card">
+						<h2 title={ l.Name }>{ l.Name }</h2>
+						<dl>
+							<div><dt>runs</dt><dd>{ fmt.Sprint(l.Runs) }</dd></div>
+							<div><dt>yield</dt><dd>{ l.Yield }</dd></div>
+							<div><dt>cost</dt><dd>{ l.Cost }</dd></div>
+							<div><dt>median</dt><dd>{ l.Median }</dd></div>
+						</dl>
+						<p class="muted">last run { l.Last }</p>
+					</article>
+				}
+			</section>
+			<section class="grid2">
+				<div class="panel">
+					<h2>Runs by outcome</h2>
+					<div class="chart" data-chart={ p.RunsChart }></div>
+				</div>
+				<div class="panel">
+					<h2>Cost by model</h2>
+					<div class="chart" data-chart={ p.CostChart }></div>
+					@dataTable(p.Cost, "No cost reported.")
+				</div>
+			</section>
+			<section class="panel">
+				<h2>Latest runs</h2>
+				@dataTable(p.Recent, "No runs.")
+			</section>
+		}
+	}
+}
+
+templ itemsPage(since string, t Table) {
+	@layout("Items", "Items") {
+		<div class="title">
+			<h1>Work items</h1>
+			@windowPicker("/items", since, nil)
+		</div>
+		<form class="find" action="/item" method="get">
+			<input name="key" placeholder="An item key, such as github.com/eyelock/ynr#12" aria-label="Item key"/>
+			<button type="submit">Show history</button>
+		</form>
+		<section class="panel">
+			@dataTable(t, "No work items in this window.")
+		</section>
+	}
+}
+
+templ itemPage(key, since string, t Table) {
+	@layout(key, "Items") {
+		<div class="title">
+			<h1><span class="muted">Item</span> { key }</h1>
+			@windowPicker("/item", since, url.Values{"key": {key}})
+		</div>
+		<p class="muted">Its steps, runs and events in order. Follow a trace id for the step's waterfall.</p>
+		<section class="panel">
+			@dataTable(t, "Nothing recorded for this item in this window.")
+		</section>
+	}
+}
+
+templ tracePage(tr Trace) {
+	@layout("Trace", "") {
+		<div class="title">
+			<h1><span class="muted">Trace</span> <span class="mono">{ tr.ID }</span></h1>
+		</div>
+		if len(tr.Spans) == 0 {
+			<p class="empty">No spans for this trace in the last 7 days.</p>
+		} else {
+			<p class="muted">Started { tr.Start } UTC, { tr.Duration } long, { fmt.Sprint(len(tr.Spans)) } spans. Click a span to fold its children.</p>
+			<section class="panel waterfall">
+				for _, s := range tr.Spans {
+					<div class="span" data-depth={ fmt.Sprint(s.Depth) } title={ s.Title } tabindex="0">
+						<div class="label" style={ fmt.Sprintf("padding-left:%dem", s.Depth) }>
+							<span class="name">{ s.Name }</span>
+							<span class="muted">{ s.Service }</span>
+						</div>
+						<div class="track">
+							<div class={ "bar", outcomeClass(s.Outcome), templ.KV("bad", s.Status == "error") } style={ fmt.Sprintf("left:%.3f%%;width:%.3f%%", s.Left, s.Width) }></div>
+						</div>
+						<div class="dur">{ s.Duration }</div>
+					</div>
+				}
+			</section>
+		}
+	}
+}
+
+templ tailPage(service, item string) {
+	@layout("Live tail", "Live tail") {
+		<div class="title">
+			<h1>Live tail</h1>
+		</div>
+		<form class="find" action="/tail" method="get">
+			<input name="service" value={ service } placeholder="service, such as ynh" aria-label="Service"/>
+			<input name="item" value={ item } placeholder="item key" aria-label="Item key"/>
+			<button type="submit">Filter</button>
+		</form>
+		<p class="muted">What tools write to the spool, newest first, as they write it.</p>
+		<section class="panel">
+			<div class="scroll">
+				<table>
+					<thead>
+						<tr><th>time</th><th>kind</th><th>service</th><th>name</th><th>lane</th><th>item</th><th>outcome</th><th>detail</th></tr>
+					</thead>
+					<tbody id="tail" hx-ext="sse" sse-connect={ "/tail/stream?" + url.Values{"service": {service}, "item": {item}}.Encode() } sse-swap="record" hx-swap="afterbegin"></tbody>
+				</table>
+			</div>
+		</section>
+	}
+}
+
+templ tailRow(r tail.Record) {
+	<tr class="fresh">
+		<td class="mono">{ r.Time.Format("15:04:05.000") }</td>
+		<td>{ r.Kind }</td>
+		<td>{ r.Service }</td>
+		<td>
+			if r.TraceID != "" {
+				<a href={ templ.SafeURL("/trace/" + r.TraceID) }>{ r.Name }</a>
+			} else {
+				{ r.Name }
+			}
+		</td>
+		<td>{ r.Lane }</td>
+		<td>
+			if r.Item != "" {
+				<a href={ templ.SafeURL("/item?key=" + url.QueryEscape(r.Item)) }>{ r.Item }</a>
+			}
+		</td>
+		<td class={ "outcome", outcomeClass(r.Outcome) }>{ r.Outcome }</td>
+		<td>{ detail(r) }</td>
+	</tr>
+}
+
+func detail(r tail.Record) string {
+	switch {
+	case r.Kind == "span":
+		return time.Duration(r.DurationMS * float64(time.Millisecond)).Round(time.Millisecond).String()
+	case r.Value != nil:
+		return fmt.Sprint(*r.Value)
+	}
+	if rs := []rune(r.Body); len(rs) > 100 {
+		return string(rs[:97]) + "..."
+	}
+	return r.Body
+}
+
+templ errorPage(title, msg string) {
+	@layout(title, "") {
+		<h1>{ title }</h1>
+		<p class="error">{ msg }</p>
+	}
+}

@@ -37,6 +37,11 @@ type Settings struct {
 	// ShipAge and ShipBytes say how often each spool file's new lines are shipped to the store.
 	ShipAge   time.Duration
 	ShipBytes int64
+	// SpoolCap caps the spool as a whole; zero takes the receiver's default.
+	SpoolCap int64
+	// RegistryTools are the tools whose telemetry registries ynr learns at startup, by bare name on
+	// the PATH (ADR-007). Empty learns nothing.
+	RegistryTools []string
 	// Upstream is an OTLP/HTTP endpoint, such as http://localhost:4318.
 	Upstream string
 	// Debug also prints a summary of everything shipped to stderr.
@@ -103,6 +108,8 @@ func Config(s Settings) (string, error) {
 				"store":              s.Store,
 				"ship_age":           shipAge(s).String(),
 				"ship_bytes":         shipBytes(s),
+				"spool_cap":          spoolCap(s),
+				"registry_tools":     registryTools(s),
 			},
 		},
 		"exporters": exp,
@@ -153,4 +160,19 @@ func shipBytes(s Settings) int64 {
 		return s.ShipBytes
 	}
 	return 16 << 20
+}
+
+func spoolCap(s Settings) int64 {
+	if s.SpoolCap > 0 {
+		return s.SpoolCap
+	}
+	return spoolreceiver.DefaultSpoolCap
+}
+
+// registryTools is the list as a non-nil slice, so the configuration always has a list.
+func registryTools(s Settings) []string {
+	if s.RegistryTools == nil {
+		return []string{}
+	}
+	return s.RegistryTools
 }

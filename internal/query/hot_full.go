@@ -1,0 +1,314 @@
+//go:build full
+
+package query
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/eyelock/ynr/internal/store"
+)
+
+// chunk is how many batch files the hot tier reads in one statement.
+const chunk = 256
+
+// Hot is the hot tier (ADR-005): a local DuckDB database holding the store's records from the
+// last window, fed from the store as batches land. It is a cache. It starts empty and fills
+// from the store, so losing it loses nothing (NFR-19).
+type Hot struct {
+	db     *sql.DB
+	r      store.Reader
+	window time.Duration
+	now    func() time.Time
+
+	mu      sync.Mutex // one Sync at a time
+	seen    map[string]bool
+	synced  time.Time // when the last Sync began; zero before the first
+	evicted time.Time
+	feed    *Feed // when set, recent hours are read through it
+	// Failed counts batch files the hot tier could not read; they are skipped, not retried.
+	Failed int
+}
+
+// OpenHot creates the hot tier's database at path, replacing whatever was there.
+func OpenHot(ctx context.Context, path string, r store.Reader, window time.Duration) (*Hot, error) {
+	for _, p := range []string{path, path + ".wal"} {
+		if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nil, err
+		}
+	}
+	db, err := sql.Open("duckdb", path)
+	if err != nil {
+		return nil, err
+	}
+	setup := macroSQL() + batchSQL(nil) + `
+CREATE TABLE spans AS FROM batch_spans;
+CREATE TABLE logs AS FROM batch_logs;
+CREATE TABLE metric_points AS FROM batch_metric_points;`
+	if _, err := db.ExecContext(ctx, setup); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("hot tier: %w", err)
+	}
+	return &Hot{db: db, r: r, window: window, now: time.Now, seen: map[string]bool{}}, nil
+}
+
+// Close closes the database.
+func (h *Hot) Close() error { return h.db.Close() }
+
+// Run runs a named query on the hot tier. A window reaching back before what the hot tier holds
+// reads the store directly instead.
+func (h *Hot) Run(ctx context.Context, q *Query, p Params) (*Result, error) {
+	if err := q.Check(p); err != nil {
+		return nil, err
+	}
+	// A minute's grace, since a default window and the hot tier's are measured moments apart.
+	if p.Since.Before(h.now().Add(-h.window - time.Minute)) {
+		return Run(ctx, h.r, q, p)
+	}
+	return runOn(ctx, h.db, q, p)
+}
+
+// UseFeed makes Sync read the current and previous hour through the polling change feed (a
+// listing position per collector, so a poll reads only new keys) instead of listing them whole.
+func (h *Hot) UseFeed() { h.feed = NewFeed(h.r) }
+
+// Sync reads the batches that have landed since the last Sync: the whole window the first time,
+// then the hours since the last Sync began, with an hour's margin. With a feed, only the first
+// Sync reads the older hours whole; every Sync reads the last two hours from the feed.
+func (h *Hot) Sync(ctx context.Context) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	now := h.now().UTC()
+	from := now.Add(-h.window)
+	first := h.synced.IsZero()
+	if !first {
+		from = h.synced.Add(-time.Hour)
+	}
+	var all []time.Time
+	if h.feed == nil || first {
+		// With a feed, the hours the feed covers (this one and the one before) are left to it.
+		end := now.Truncate(time.Hour).Add(time.Hour)
+		if h.feed != nil {
+			end = now.Truncate(time.Hour).Add(-time.Hour)
+		}
+		for t := from.Truncate(time.Hour); t.Before(end); t = t.Add(time.Hour) {
+			all = append(all, t)
+		}
+	}
+	var errs []error
+	var polled map[string][]string
+	if h.feed != nil {
+		var err error
+		polled, err = h.feed.Poll(ctx, now, []string{store.Traces, store.Logs, store.Metrics})
+		errs = append(errs, err)
+	}
+	var unread bool // an hour that could not be listed
+	for _, sig := range signals {
+		var parts, batches []string
+		for _, t := range all {
+			hr, err := ReadHour(ctx, h.r, sig.name, t)
+			if err != nil {
+				errs = append(errs, err)
+				unread = true
+				continue
+			}
+			parts = append(parts, h.unseen(hr.Parts)...)
+			batches = append(batches, h.unseen(hr.Batches)...)
+		}
+		batches = append(batches, h.unseen(polled[sig.name])...)
+		for _, keys := range [][]string{parts, batches} {
+			for len(keys) > 0 {
+				n := min(chunk, len(keys))
+				errs = append(errs, h.ingest(ctx, sig.name, keys[:n], now))
+				keys = keys[n:]
+			}
+		}
+	}
+	if now.Sub(h.evicted) >= time.Hour {
+		errs = append(errs, h.evict(ctx, now))
+		h.evicted = now
+	}
+	// With a feed, a first Sync whose older hours failed to read is repeated, so a restart
+	// never leaves a hole in the window; what was read is skipped as seen.
+	if h.feed == nil || !first || !unread {
+		h.synced = now
+	}
+	return errors.Join(errs...)
+}
+
+func (h *Hot) unseen(keys []string) []string {
+	var out []string
+	for _, k := range keys {
+		if !h.seen[k] {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// ingest adds the records in a signal's batch files or compacted parts (never both at once)
+// that the hot tier does not hold yet. If the
+// files cannot be read together, each is read alone, and one that still fails is counted and
+// skipped, so a damaged file never blocks the rest.
+func (h *Hot) ingest(ctx context.Context, signal string, keys []string, now time.Time) error {
+	err := h.insert(ctx, signal, keys, now)
+	if err == nil || len(keys) == 1 {
+		if err != nil {
+			h.Failed++
+		}
+		for _, k := range keys {
+			h.seen[k] = true
+		}
+		return err
+	}
+	var errs []error
+	for _, k := range keys {
+		errs = append(errs, h.ingest(ctx, signal, []string{k}, now))
+	}
+	return errors.Join(errs...)
+}
+
+func (h *Hot) insert(ctx context.Context, signal string, keys []string, now time.Time) error {
+	files, err := local(ctx, h.r, keys)
+	if err != nil {
+		return err
+	}
+	var sig = signals[0]
+	for _, x := range signals {
+		if x.name == signal {
+			sig = x
+		}
+	}
+	conn, err := h.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = conn.Close() }()
+	src := "batch_" + sig.table
+	if _, _, err := store.ParseCompacted(keys[0]); err == nil {
+		src = "(" + maskedParquet(files) + ")"
+	} else if _, err := conn.ExecContext(ctx, batchSQL(map[string][]string{signal: files})); err != nil {
+		return fmt.Errorf("hot tier: %w", err)
+	}
+	stmt := fmt.Sprintf(`INSERT INTO %s BY NAME
+SELECT * FROM %s b
+WHERE (b.time IS NULL OR b.time >= $since)
+  AND NOT EXISTS (SELECT 1 FROM %s t WHERE t.record_id = b.record_id)`, sig.table, src, sig.table)
+	if _, err := conn.ExecContext(ctx, stmt, sql.Named("since", now.Add(-h.window))); err != nil {
+		return fmt.Errorf("hot tier: reading %d %s batches: %w", len(keys), signal, err)
+	}
+	return nil
+}
+
+// evict drops records older than the window, and forgets batch files received before it.
+func (h *Hot) evict(ctx context.Context, now time.Time) error {
+	cut := now.Add(-h.window)
+	for _, table := range []string{"spans", "logs", "metric_points"} {
+		if _, err := h.db.ExecContext(ctx, "DELETE FROM "+table+" WHERE time < $cut", sql.Named("cut", cut)); err != nil {
+			return fmt.Errorf("hot tier: evicting: %w", err)
+		}
+	}
+	oldest := HourPrefix("", cut.Add(-time.Hour))
+	for k := range h.seen {
+		// A key is <signal>/<yyyy>/<mm>/<dd>/<hh>/...: compare its hour with the cut.
+		if i := strings.IndexByte(k, '/'); i > 0 && len(k) > i+14 && k[i:i+15] < oldest {
+			delete(h.seen, k)
+		}
+	}
+	return nil
+}
+
+// Count is how many records the hot tier holds of each kind, for ynr info and tests.
+func (h *Hot) Count(ctx context.Context) (map[string]int64, error) {
+	out := map[string]int64{}
+	for _, table := range []string{"spans", "logs", "metric_points"} {
+		var n int64
+		if err := h.db.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&n); err != nil {
+			return nil, err
+		}
+		out[table] = n
+	}
+	return out, nil
+}
+
+// ServeHot runs the hot tier until ctx ends: it fills from the store every Poll and answers
+// the named queries on a Unix socket only its owner can open (NFR-18).
+func ServeHot(ctx context.Context, cfg HotConfig) error {
+	h, err := OpenHot(ctx, cfg.Path, cfg.Store, cfg.Window)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = h.Close() }()
+	ln, err := listenUnix(cfg.Socket)
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{Handler: Handler(h, time.Now), ReadHeaderTimeout: 5 * time.Second}
+	go func() { _ = srv.Serve(ln) }()
+	var ui *http.Server
+	if cfg.UI != nil {
+		ui = &http.Server{Handler: cfg.UIHandler(h), ReadHeaderTimeout: 5 * time.Second,
+			BaseContext: func(net.Listener) context.Context { return ctx }}
+		go func() { _ = ui.Serve(cfg.UI) }()
+	}
+	defer func() {
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(sctx)
+		_ = os.Remove(cfg.Socket)
+		if ui != nil {
+			_ = ui.Shutdown(sctx)
+		}
+	}()
+	if cfg.Feed {
+		h.UseFeed()
+	}
+	every := cfg.CompactEvery
+	if every <= 0 {
+		every = time.Minute
+	}
+	tick := time.NewTicker(cfg.Poll)
+	defer tick.Stop()
+	var compacted time.Time
+	for {
+		if err := h.Sync(ctx); err != nil && ctx.Err() == nil {
+			cfg.Logf("hot tier: %v", err)
+		}
+		if cfg.Compact != nil && time.Since(compacted) >= every {
+			compacted = time.Now()
+			if _, err := Compact(ctx, cfg.Store, *cfg.Compact, compacted); err != nil && ctx.Err() == nil {
+				cfg.Logf("compaction: %v", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tick.C:
+		}
+	}
+}
+
+// listenUnix listens on a socket only the owner can connect to, replacing a stale one left by a
+// process that died: ynr serve holds the spool's lock, so no live server owns it.
+func listenUnix(socket string) (net.Listener, error) {
+	if err := os.Remove(socket); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	ln, err := net.Listen("unix", socket)
+	if err != nil {
+		return nil, fmt.Errorf("hot tier: listening on %s: %w", socket, err)
+	}
+	if err := os.Chmod(socket, 0o600); err != nil {
+		_ = ln.Close()
+		return nil, err
+	}
+	return ln, nil
+}

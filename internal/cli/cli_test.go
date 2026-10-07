@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eyelock/ynr"
 	"github.com/eyelock/ynr/internal/spool"
 )
 
@@ -29,7 +30,7 @@ func TestUsageAndVersion(t *testing.T) {
 	if code, _, _ := run("nope"); code != ExitUsage {
 		t.Errorf("unknown command = %d", code)
 	}
-	if code, out, _ := run("version"); code != ExitOK || !strings.Contains(out, "slim") {
+	if code, out, _ := run("version"); code != ExitOK || !strings.Contains(out, ynr.Build) {
 		t.Errorf("version = %d %q", code, out)
 	}
 }
@@ -41,7 +42,7 @@ func TestInfoReportsTheServingProcess(t *testing.T) {
 	}
 	code, out, _ := run("info", "--spool", root, "--format", "json")
 	var rep infoReport
-	if code != ExitOK || json.Unmarshal([]byte(out), &rep) != nil || rep.Serving != nil || rep.Build != "slim" {
+	if code != ExitOK || json.Unmarshal([]byte(out), &rep) != nil || rep.Serving != nil || rep.Build != ynr.Build {
 		t.Fatalf("info = %d %s", code, out)
 	}
 	l, err := spool.Acquire(root)
@@ -57,15 +58,19 @@ func TestInfoReportsTheServingProcess(t *testing.T) {
 
 func TestServeRefusals(t *testing.T) {
 	root := t.TempDir()
+	uiRefusal := "full build" // the slim build has no dashboard; the full one binds only loopback
+	if ynr.Build == "full" {
+		uiRefusal = "not a loopback address"
+	}
 	cases := []struct {
 		name string
 		args []string
 		code int
 		msg  string
 	}{
-		{"ui in slim", []string{"--spool", root, "--upstream", "http://x", "--ui", ":8080"}, ExitConfig, "full build"},
+		{"ui", []string{"--spool", root, "--upstream", "http://x", "--ui", ":8080"}, ExitConfig, uiRefusal},
 		{"nowhere to ship", []string{"--spool", root, "--store", ""}, ExitConfig, "nowhere to ship"},
-		{"bad store", []string{"--spool", root, "--store", "s3://bucket"}, ExitConfig, "--store"},
+		{"bad store", []string{"--spool", root, "--store", "gs://bucket"}, ExitConfig, "--store"},
 		{"bad collector id", []string{"--spool", root, "--upstream", "http://x", "--collector-id", "Bad Id"}, ExitConfig, "collector-id"},
 	}
 	for _, c := range cases {
@@ -183,5 +188,41 @@ func TestRelayStopsWhenStdinCloses(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("the relay kept running after stdin closed")
+	}
+}
+
+func TestTelemetryRegistryPrintsYnrsNamesInTheShapeEveryToolUses(t *testing.T) {
+	code, out, _ := run("telemetry", "registry", "--format", "json")
+	if code != ExitOK {
+		t.Fatalf("exit %d", code)
+	}
+	var r struct {
+		Tool       string                   `json:"tool"`
+		Version    string                   `json:"version"`
+		Semconv    struct{ Version string } `json:"semantic_conventions"`
+		Attributes []struct{ ID string }    `json:"attributes"`
+		Standard   []string                 `json:"standard_attributes"`
+		Metrics    []struct{ Name string }  `json:"metrics"`
+	}
+	if err := json.Unmarshal([]byte(out), &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Tool != "ynr" || r.Version != ynr.Version || r.Semconv.Version == "" || len(r.Attributes) == 0 || len(r.Metrics) == 0 {
+		t.Errorf("%+v", r)
+	}
+	if code, out, _ := run("telemetry", "registry"); code != ExitOK || !strings.Contains(out, "ynr.registry.unknown_names") {
+		t.Errorf("text: %d %q", code, out)
+	}
+	for _, args := range [][]string{{"telemetry"}, {"telemetry", "nope"}, {"telemetry", "registry", "--format", "yaml"}} {
+		if code, _, _ := run(args...); code != ExitUsage {
+			t.Errorf("%v = %d", args, code)
+		}
+	}
+}
+
+func TestSplitList(t *testing.T) {
+	got := splitList(" ynh, ynf,,ynm ,ynh")
+	if strings.Join(got, "|") != "ynh|ynf|ynm" || splitList("") != nil {
+		t.Errorf("%q", got)
 	}
 }
