@@ -74,10 +74,12 @@ func Config(s Settings) (string, error) {
 	exp := map[string]any{}
 	if s.Upstream != "" {
 		exporters = append(exporters, "otlp_http")
-		retry := map[string]any{"enabled": true, "max_elapsed_time": "30s"}
+		// The Collector requires initial_interval <= max_interval <= max_elapsed_time, and its
+		// defaults (5s, 30s) do not fit under a short bound, so all three are set.
+		retry := map[string]any{"enabled": true, "initial_interval": "5s", "max_interval": "30s", "max_elapsed_time": "30s"}
 		if s.Store != "" {
 			// A best-effort copy: a short retry, so a slow upstream delays shipping little.
-			retry = map[string]any{"enabled": true, "max_elapsed_time": "5s"}
+			retry = map[string]any{"enabled": true, "initial_interval": "1s", "max_interval": "2s", "max_elapsed_time": "5s"}
 		}
 		exp["otlp_http"] = map[string]any{
 			"endpoint": s.Upstream,

@@ -214,3 +214,105 @@ func gunzip(t *testing.T, path string) string {
 	}
 	return string(b)
 }
+
+// okUpstream is a fake OTLP/HTTP upstream that accepts everything and counts the trace exports.
+func okUpstream(t *testing.T) (*httptest.Server, func() int) {
+	t.Helper()
+	var mu sync.Mutex
+	n := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if r.URL.Path == "/v1/traces" {
+			mu.Lock()
+			n++
+			mu.Unlock()
+		}
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return srv, func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return n
+	}
+}
+
+// TestStartsWithAStoreAndAnUpstream runs the real Collector with both: the upstream's retry
+// settings must pass the Collector's validation, and both destinations must receive the data.
+func TestStartsWithAStoreAndAnUpstream(t *testing.T) {
+	upstream, seen := okUpstream(t)
+	root, storeDir := t.TempDir(), t.TempDir()
+	if err := spool.Init(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "local", "ynh-a-000001.jsonl"), []byte(traceLine+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Settings{
+			SpoolRoot: root, PollInterval: 20 * time.Millisecond, MaxLine: spool.DefaultMaxLine,
+			Identity: stamp.Identity{ID: "laptop"}, Store: store.FolderURL(storeDir), Upstream: upstream.URL,
+		})
+	}()
+	deadline := time.Now().Add(15 * time.Second)
+	for len(batches(t, storeDir)) < 1 || seen() < 1 {
+		select {
+		case err := <-done:
+			t.Fatalf("the collector stopped before shipping: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("batches = %v, upstream exports = %d; want both", batches(t, storeDir), seen())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("run: %v", err)
+	}
+}
+
+// TestShipsOnShutdownWithoutAStore writes a line after the last poll and stops: the final poll
+// must still forward it to the upstream.
+func TestShipsOnShutdownWithoutAStore(t *testing.T) {
+	upstream, seen := okUpstream(t)
+	root := t.TempDir()
+	if err := spool.Init(root); err != nil {
+		t.Fatal(err)
+	}
+	first := filepath.Join(root, "local", "ynh-1.jsonl")
+	if err := os.WriteFile(first, []byte(traceLine+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Settings{
+			// Polls an hour apart: after the first, only the final poll can ship.
+			SpoolRoot: root, PollInterval: time.Hour, MaxLine: spool.DefaultMaxLine,
+			Identity: stamp.Identity{ID: "ci"}, Upstream: upstream.URL,
+		})
+	}()
+	deadline := time.Now().Add(15 * time.Second)
+	for seen() < 1 {
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("the first poll never shipped")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := os.WriteFile(filepath.Join(root, "local", "ynh-2.jsonl"), []byte(traceLine+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("run: %v", err)
+	}
+	if n := seen(); n != 2 {
+		t.Fatalf("upstream saw %d trace exports, want 2: the line written before shutdown was not shipped", n)
+	}
+}
