@@ -1,0 +1,16 @@
+# Default owners for everything in the repo
+* @eyelock
+
+# Source
+/cmd/ @eyelock
+/internal/ @eyelock
+/spoolexporter/ @eyelock
+/telemetry/ @eyelock
+
+# Design and infrastructure
+/docs/adr/ @eyelock
+/infra/ @eyelock
+
+# Build and CI
+/Makefile @eyelock
+/.github/workflows/ @eyelock

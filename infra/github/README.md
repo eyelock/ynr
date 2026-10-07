@@ -6,10 +6,10 @@ and set up again from nothing.
 | File | What it manages |
 |---|---|
 | `repository.tf` | The repository: description, topics, visibility, features, merge options |
-| `branches.tf` | Gitflow: `develop` as the default branch, and protection on `main` and `develop`: a pull request required with `check` green (plus "Verify PR source branch" into `main`, so it takes only `develop`, `release/*` and `hotfix/*`), admins included, no force-push or delete |
+| `branches.tf` | Gitflow: `develop` as the default branch, and a repository ruleset on each of `develop` and `main`: a pull request with conversations resolved and "All Clear" green (plus "Verify PR source branch" into `main`, so it takes only `develop`, `release/*` and `hotfix/*`), no force-push or delete, repository admins can bypass. See [`.github/BRANCH_PROTECTION.md`](../../.github/BRANCH_PROTECTION.md) |
 | `labels.tf` | Issue and PR labels, authoritatively: a label not listed is removed |
 | `actions.tf` | Actions permissions, the read-only default `GITHUB_TOKEN`, and that the `RELEASE_TOKEN` secret exists |
-| `security.tf` | Dependabot alerts and security updates |
+| `security.tf` | Dependabot alerts and security updates, and private vulnerability reporting once the repository is public. Secret scanning and push protection are in `repository.tf`, on when `visibility` is `public` |
 | `imports.tf` | Import blocks that adopt the live repository into a fresh state |
 
 Not managed here: anything committed to the repository (`.github/`).
@@ -30,7 +30,7 @@ gh secret set RELEASE_TOKEN -R eyelock/ynr
 
 ## Use
 
-Needs Terraform 1.10 or later, a GitHub token with the `repo` and `workflow` scopes, and the
+Needs Terraform 1.10 or later, a GitHub token with the `repo` and `workflow` scopes (the repository's rulesets and security settings need admin on it), the `gh` CLI on `PATH` (private vulnerability reporting), and the
 `ynr-terraform` AWS profile. State is in S3 at
 `s3://ynr-terraform-state.eyelock.net/github/terraform.tfstate`, locked with a `.tflock` object
 beside it; the bucket comes from [`../terraform-state`](../terraform-state/README.md). It holds no

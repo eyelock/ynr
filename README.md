@@ -76,3 +76,8 @@ releasing a new `spoolexporter/v*`, raise that requirement.
 Work goes on feature branches into `develop` by pull request; `main` moves only by release
 (gitflow, as in ynh, ynm and ynf). The repository's own settings are Terraform in
 [`infra/`](infra/README.md).
+
+## Contributing and license
+
+See [CONTRIBUTING.md](CONTRIBUTING.md), the [Code of Conduct](CODE_OF_CONDUCT.md) and
+[SECURITY.md](SECURITY.md). ynr is released under the [MIT License](LICENSE).
