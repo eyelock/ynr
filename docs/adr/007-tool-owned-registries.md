@@ -6,7 +6,7 @@ Satisfies: FR-9, NFR-1, NFR-8
 ## Context
 
 The names a tool emits, its events, attributes and metrics, are part of that tool's interface.
-The tool knows what it does, and it may be public while ynr is private. ynr's job is to honour
+The tool knows what it does. ynr's job is to honour
 what each tool says it will emit, not to define it, and never to let a sender tell it what to run
 or fetch.
 
@@ -60,7 +60,7 @@ has a name.
 ## Alternatives
 
 - **One registry for every tool, kept in ynr.** Not chosen: a tool would depend on ynr to describe
-  itself, and a public tool on a private repository.
+  itself.
 - **A shared public registry repository.** Not chosen: every tool change becomes a change to a
   repository the tool does not own.
 - **A copy of one registry in each tool.** Not chosen: copies drift, and nobody owns the truth.

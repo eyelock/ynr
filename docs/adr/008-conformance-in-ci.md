@@ -73,11 +73,9 @@ gating merges. It plants a canary prompt and a repository settings file that tri
 logging on, and fails if the canary reaches the spool.
 
 **Distributed like the siblings.** `ynr` is released with GoReleaser to its GitHub releases and
-published through `eyelock/homebrew-tap`, as ynh, ynf and ynm are. A tool's CI installs a pinned
-version and runs `ynr conformance` as an ordinary step; there is no separate action to maintain.
-ynr's repository stays private until the YN* tools have stabilised, and is then made public.
-Until then its release assets need a token to download, as ynf's do, so each tool's CI holds a
-read-only token as a secret (`HOMEBREW_GITHUB_API_TOKEN`).
+published through `eyelock/homebrew-tap`, as ynh, ynf and ynm are. A tool's CI downloads a pinned
+release (`gh release download`), puts `ynr` and the stub vendor on `PATH`, and runs `ynr conformance`
+as an ordinary step; there is no separate action to maintain, and no token is needed.
 
 ## Alternatives
 
@@ -93,9 +91,6 @@ read-only token as a secret (`HOMEBREW_GITHUB_API_TOKEN`).
 - Every tool's required merge check depends on a pinned `ynr` release. This is the one
   dependency on ynr a sibling takes, and it is in CI only (NFR-8).
 - ynr must publish a release through the tap before any tool can make the check required.
-- While ynr is private, pull requests from forks of a public tool such as ynh cannot read the
-  token, so the check cannot run for them; it runs once a maintainer's branch carries the change.
-  This ends when ynr is made public.
 - A tool can run `ynr conformance` locally with the same result as CI.
 
 ## Open questions
