@@ -12,19 +12,19 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: spoolexporter/js/package-lock.json
-      - uses: golangci/golangci-lint-action@v8
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
           install-only: true
@@ -39,13 +39,13 @@ jobs:
     env:
       MINIO_VERSION: RELEASE.2025-10-15T17-29-55Z
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
       - name: cache minio
         id: minio-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/minio-bin
           key: minio-${{ env.MINIO_VERSION }}-${{ runner.os }}-${{ runner.arch }}
