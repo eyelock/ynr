@@ -29,7 +29,7 @@ comments, commits, issues and other contributions that do not follow them, and m
 contributor for behaviour they deem inappropriate.
 
 Report abuse privately through the repository's **Security** tab (**Report a vulnerability**), or
-by contacting the maintainer, @eyelock, on GitHub. All reports are reviewed and handled
+by emailing support@eyelock.net. All reports are reviewed and handled
 confidentially.
 
 ## Attribution

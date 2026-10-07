@@ -4,7 +4,8 @@
 
 Please do not open a public issue for a security problem. Report it privately through GitHub's
 private vulnerability reporting: open the repository's **Security** tab, choose **Report a
-vulnerability**, and describe what you found and how to reproduce it.
+vulnerability**, and describe what you found and how to reproduce it. You can also email
+support@eyelock.net.
 
 You can expect an acknowledgement within a few days. Fixes are released from `develop` through the
 usual release process, and the report is credited unless you prefer otherwise.
