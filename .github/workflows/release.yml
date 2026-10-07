@@ -9,18 +9,12 @@ permissions:
   contents: write
   # Keyless cosign signing exchanges this for a short-lived certificate bound to this workflow.
   id-token: write
-env:
-  GOPRIVATE: github.com/eyelock/ynr
 jobs:
   check:
     name: make check (release gate)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: let go read this repository
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: git config --global url."https://x-access-token:${GH_TOKEN}@github.com/eyelock/ynr".insteadOf "https://github.com/eyelock/ynr"
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_wrapper: false
@@ -46,10 +40,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: let go read this repository
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: git config --global url."https://x-access-token:${GH_TOKEN}@github.com/eyelock/ynr".insteadOf "https://github.com/eyelock/ynr"
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

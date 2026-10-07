@@ -11,9 +11,9 @@ variable "repository" {
 }
 
 variable "visibility" {
-  description = "Repository visibility: private until the YN* tools have stabilised, then public (ADR-008)"
+  description = "Repository visibility: public since the YN* tools stabilised (ADR-008)"
   type        = string
-  default     = "private"
+  default     = "public"
 
   validation {
     condition     = contains(["private", "public"], var.visibility)

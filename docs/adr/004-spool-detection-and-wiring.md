@@ -179,10 +179,6 @@ turns nothing on.
 ## Consequences
 
 - Each sibling depends on the OpenTelemetry SDK and the spool exporter for its language.
-- While ynr's repository is private, fetching the Go module needs a read-only token
-  (`GOPRIVATE=github.com/eyelock/ynr`), in CI and for anyone building a sibling from source. For a
-  public tool such as ynh, that means building from source outside its maintainers' machines and
-  CI waits until ynr is made public; its released binaries are unaffected.
 - A run that is killed leaves its started events and every batch already written.
 
 ## Open questions
