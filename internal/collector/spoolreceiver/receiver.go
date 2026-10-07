@@ -133,15 +133,14 @@ func (r *spoolReceiver) Shutdown(context.Context) error {
 		if r.cancel != nil {
 			r.cancel()
 			<-r.done
-			if r.st != nil {
-				// Ship whatever is waiting, however young, before stopping.
-				r.reader.Force = true
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				if err := r.PollOnce(ctx); err != nil {
-					r.logger.Warn("final shipment incomplete; the spool keeps the rest", zap.Error(err))
-				}
-				cancel()
+			// Ship whatever is waiting, however young, before stopping. Without a store Force has
+			// no effect, but the final poll still forwards lines written since the last one.
+			r.reader.Force = r.st != nil
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := r.PollOnce(ctx); err != nil {
+				r.logger.Warn("final shipment incomplete; the spool keeps the rest", zap.Error(err))
 			}
+			cancel()
 			r.logCounts("spool reader stopped")
 			r.logUnknown("names outside their registries, final")
 		}

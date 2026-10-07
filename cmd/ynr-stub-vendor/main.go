@@ -4,6 +4,10 @@
 // trace in TRACEPARENT, and exits with the scripted result. ynr conformance puts it on the PATH
 // so a tool that runs a vendor CLI can be tested in CI with no model and no luck.
 //
+// With --input-format stream-json it is a session instead, as ynh drives Claude Code: user turns
+// and control requests arrive as JSON lines on stdin, and system, assistant, result and
+// control_response events leave as JSON lines on stdout (see session.go).
+//
 // It never echoes what it is asked: like Claude Code with prompt logging off, the prompt reaches
 // telemetry as <REDACTED>.
 package main
@@ -57,23 +61,35 @@ type script struct {
 	OutputTokens int64  `json:"output_tokens"`
 }
 
-func main() { os.Exit(run(os.Args[1:], os.Environ(), os.Stdout, os.Stderr)) }
+func main() { os.Exit(run(os.Args[1:], os.Environ(), os.Stdin, os.Stdout, os.Stderr)) }
 
-func run(args, environ []string, stdout, stderr io.Writer) int {
+func run(args, environ []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	env := envMap(environ)
-	s := script{Turns: 1, Result: "success", Model: "stub-model", InputTokens: 100, OutputTokens: 20}
+	// Turns starts unset: flag mode then answers one turn, a session any number.
+	s := script{Turns: -1, Result: "success", Model: "stub-model", InputTokens: 100, OutputTokens: 20}
 	fs := flag.NewFlagSet("ynr-stub-vendor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	file := fs.String("script", "", "a JSON script: turns, turn_delay, exit, result, model, input_tokens, output_tokens")
-	turns := fs.Int("turns", -1, "turns to answer (YNR_STUB_TURNS)")
+	turns := fs.Int("turns", -1, "turns to answer (YNR_STUB_TURNS); in a session a cap, 0 for none")
 	delay := fs.String("turn-delay", "", "time each turn takes, such as 200ms (YNR_STUB_TURN_DELAY)")
 	exit := fs.Int("exit", -1, "exit code (YNR_STUB_EXIT)")
 	result := fs.String("result", "", "result named in the last line of output")
 	// A vendor CLI is given a prompt and options; the stub accepts and ignores them.
 	_ = fs.String("p", "", "ignored: the prompt")
-	_ = fs.String("print", "", "ignored")
+	_ = fs.Bool("print", false, "ignored")
+	_ = fs.Bool("verbose", false, "ignored")
 	_ = fs.String("output-format", "", "ignored")
 	_ = fs.String("model", "", "ignored")
+	// A stream-json session is selected by --input-format; the rest of what ynh passes is
+	// accepted, and only the session-shaped options are used.
+	inputFormat := fs.String("input-format", "", "stream-json runs a session on stdin and stdout")
+	permMode := fs.String("permission-mode", "", "reported by the session's init event")
+	effort := fs.String("effort", "", "reported by the session's settings")
+	sessionID := fs.String("session-id", "", "the session's id")
+	resume := fs.String("resume", "", "the session id to resume")
+	for _, name := range []string{"plugin-dir", "add-dir", "append-system-prompt", "settings"} {
+		_ = fs.String(name, "", "ignored")
+	}
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -123,6 +139,25 @@ func run(args, environ []string, stdout, stderr io.Writer) int {
 	}
 
 	x := newExporter(env, stderr)
+	if s.Turns < 0 {
+		s.Turns = 1
+		if *inputFormat == "stream-json" {
+			s.Turns = 0
+		}
+	}
+	if *inputFormat == "stream-json" {
+		id := *sessionID
+		if id == "" {
+			id = *resume
+		}
+		if id == "" {
+			id = randHex(16)
+		}
+		return runSession(stdin, stdout, x, s, turnDelay, sessionOptions{id: id, permissionMode: *permMode, effort: *effort})
+	} else if *inputFormat != "" && *inputFormat != "text" {
+		_, _ = fmt.Fprintf(stderr, "ynr-stub-vendor: input format %q is not supported\n", *inputFormat)
+		return 2
+	}
 	for i := 1; i <= s.Turns; i++ {
 		time.Sleep(turnDelay)
 		x.turn(i, s)
