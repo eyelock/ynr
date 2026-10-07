@@ -30,8 +30,9 @@ const turnCost = 0.001
 // --input-format stream-json --output-format stream-json --verbose): it announces itself with a
 // system init event, then reads one JSON object per line from in. A control_request is answered
 // with a control_response. A user message is a turn: the stub exports its telemetry, then writes an
-// assistant event and a result event carrying that turn's usage and the running cost. After the
-// scripted number of turns, or when in closes, it exits with the scripted code.
+// assistant event and a result event carrying that turn's usage and the running cost. Every turn is answered until in
+// closes, or until the optional cap s.Turns (0 for none) is reached, which ends the session
+// cleanly. Either way it exits with the scripted code, and each result carries the scripted subtype.
 func runSession(in io.Reader, out io.Writer, x *exporter, s script, turnDelay time.Duration, o sessionOptions) int {
 	enc := json.NewEncoder(out)
 	emit := func(v map[string]any) { _ = enc.Encode(v) }
@@ -46,7 +47,7 @@ func runSession(in io.Reader, out io.Writer, x *exporter, s script, turnDelay ti
 	sc.Buffer(make([]byte, 1<<20), 8<<20)
 	var cost float64
 	answered := 0
-	for answered < s.Turns && sc.Scan() {
+	for (s.Turns == 0 || answered < s.Turns) && sc.Scan() {
 		var m struct {
 			Type      string `json:"type"`
 			RequestID string `json:"request_id"`

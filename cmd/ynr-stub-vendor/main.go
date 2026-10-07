@@ -65,11 +65,12 @@ func main() { os.Exit(run(os.Args[1:], os.Environ(), os.Stdin, os.Stdout, os.Std
 
 func run(args, environ []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	env := envMap(environ)
-	s := script{Turns: 1, Result: "success", Model: "stub-model", InputTokens: 100, OutputTokens: 20}
+	// Turns starts unset: flag mode then answers one turn, a session any number.
+	s := script{Turns: -1, Result: "success", Model: "stub-model", InputTokens: 100, OutputTokens: 20}
 	fs := flag.NewFlagSet("ynr-stub-vendor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	file := fs.String("script", "", "a JSON script: turns, turn_delay, exit, result, model, input_tokens, output_tokens")
-	turns := fs.Int("turns", -1, "turns to answer (YNR_STUB_TURNS)")
+	turns := fs.Int("turns", -1, "turns to answer (YNR_STUB_TURNS); in a session a cap, 0 for none")
 	delay := fs.String("turn-delay", "", "time each turn takes, such as 200ms (YNR_STUB_TURN_DELAY)")
 	exit := fs.Int("exit", -1, "exit code (YNR_STUB_EXIT)")
 	result := fs.String("result", "", "result named in the last line of output")
@@ -138,6 +139,12 @@ func run(args, environ []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	}
 
 	x := newExporter(env, stderr)
+	if s.Turns < 0 {
+		s.Turns = 1
+		if *inputFormat == "stream-json" {
+			s.Turns = 0
+		}
+	}
 	if *inputFormat == "stream-json" {
 		id := *sessionID
 		if id == "" {

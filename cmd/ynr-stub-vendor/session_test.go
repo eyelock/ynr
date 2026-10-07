@@ -37,7 +37,7 @@ func TestStreamJSONSession(t *testing.T) {
 	args := []string{"--input-format", "stream-json", "--output-format", "stream-json", "--print", "--verbose",
 		"--plugin-dir", "/x/.claude", "--add-dir", "/x", "--append-system-prompt", "be brief", "--model", "sonnet",
 		"--effort", "high", "--permission-mode", "acceptEdits", "--settings", "{}", "--session-id", "abc",
-		"--turns", "2", "--exit", "3"}
+		"--exit", "3"}
 	go func() {
 		code <- run(args, env, inR, outW, &errb)
 		_ = outW.Close()
@@ -69,7 +69,7 @@ func TestStreamJSONSession(t *testing.T) {
 		t.Fatalf("usage response: %v", usage)
 	}
 
-	for turn := 1; turn <= 2; turn++ {
+	for turn := 1; turn <= 3; turn++ {
 		write(`{"type":"user","message":{"role":"user","content":"SECRET PROMPT"}}`)
 		a := event(t, sc)
 		msg, _ := a["message"].(map[string]any)
@@ -94,15 +94,21 @@ func TestStreamJSONSession(t *testing.T) {
 			t.Fatalf("turn %d total_cost_usd %v, want %v", turn, got, want)
 		}
 	}
+	// No cap: the session stays up until stdin closes, then exits with the scripted code.
+	select {
+	case c := <-code:
+		t.Fatalf("the session ended on its own with exit %d", c)
+	case <-time.After(200 * time.Millisecond):
+	}
+	_ = inW.Close()
 	select {
 	case c := <-code:
 		if c != 3 {
 			t.Errorf("exit %d, want 3 (%s)", c, errb.String())
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatal("the session did not end after its scripted turns")
+		t.Fatal("the session did not end when stdin closed")
 	}
-	_ = inW.Close()
 
 	req := ptraceotlp.NewExportRequest()
 	if err := req.UnmarshalProto(s.body("/v1/traces")); err != nil {
@@ -137,6 +143,19 @@ func TestSessionEndsWhenStdinCloses(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `"subtype":"budget"`) || !strings.Contains(out.String(), `"is_error":true`) {
 		t.Errorf("the scripted result is missing: %s", out.String())
+	}
+}
+
+// TestSessionTurnCap: --turns in a session is a cap; reaching it ends the session cleanly.
+func TestSessionTurnCap(t *testing.T) {
+	var out, errb bytes.Buffer
+	turn := `{"type":"user","message":{"role":"user","content":"hi"}}` + "\n"
+	in := strings.NewReader(strings.Repeat(turn, 5))
+	if code := run([]string{"--input-format", "stream-json", "--print", "--turns", "2", "--exit", "4"}, nil, in, &out, &errb); code != 4 {
+		t.Errorf("exit %d, want 4 (%s)", code, errb.String())
+	}
+	if n := strings.Count(out.String(), `"type":"result"`); n != 2 {
+		t.Errorf("%d results, want 2: %s", n, out.String())
 	}
 }
 
