@@ -1,20 +1,27 @@
 version: 2
 updates:
-  # Keep GitHub Actions up to date
+  # Keep GitHub Actions up to date: one PR a week for all of them.
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]
 
-  # Go modules: ynr, and the spool exporter module
+  # Go modules: ynr, and the spool exporter module. One PR a week per module, since separate PRs
+  # for the same go.mod conflict with each other as soon as one merges.
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "deps"
+    groups:
+      go:
+        patterns: ["*"]
 
   - package-ecosystem: "gomod"
     directory: "/spoolexporter"
@@ -22,11 +29,22 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "deps"
+    groups:
+      go:
+        patterns: ["*"]
 
-  # The npm spool exporter
+  # The npm spool exporter.
   - package-ecosystem: "npm"
     directory: "/spoolexporter/js"
     schedule:
       interval: "weekly"
     commit-message:
       prefix: "deps"
+    groups:
+      npm:
+        patterns: ["*"]
+    ignore:
+      # Node's type definitions track the Node version the package runs and is tested on (24, in
+      # CI and engines); a new major comes with moving Node itself.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
