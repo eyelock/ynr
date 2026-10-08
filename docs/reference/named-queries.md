@@ -122,6 +122,9 @@ Ordered by cost, highest first.
 from records, in whole days. The `median_s` column is then empty, because a median cannot be rolled
 up. The other queries always read records.
 
+Rollups are written for a day after it has closed. A window longer than 7 days therefore leaves out
+days with no rollup yet, today included, and answers `no records in this window` when none exists.
+
 ## Promoted columns
 
 The queries read `spans`, `logs` and `metric_points`, which promote these attributes to columns. Where

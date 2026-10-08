@@ -118,6 +118,36 @@ github.com/example/factory#lint-paydown  converged  1     42        0.0731    20
 
 With no `ynr serve` to ask, `ynr query` read the store's files directly. The answer is the same.
 
+## Compaction
+
+`ynr serve` compacts an hour of batches into Parquet once the hour has closed and ten minutes have
+passed. Your batch's path says which hour it was received in; in the example that is hour 10. Once that hour
+has closed and ten minutes have passed, which in the example is 11:10 UTC, start `ynr serve` again,
+in terminal A:
+
+```bash
+ynr serve
+```
+
+Within a minute, in terminal C:
+
+```bash
+find ~/ynr-tutorial/data -type f
+```
+
+Expected:
+
+```text
+/Users/you/ynr-tutorial/data/ynr/store/compacted/traces/2026/10/08/10/_manifest-1.json
+/Users/you/ynr-tutorial/data/ynr/store/compacted/traces/2026/10/08/10/part-1.parquet
+/Users/you/ynr-tutorial/data/ynr/store/index/items/2026/10/08.parquet
+/Users/you/ynr-tutorial/data/ynr/store/traces/2026/10/08/10/local-your-host/01M4DH2D7WG82KEPG8SRHFCS3Y_local.ynr-relay-64344-000001-0-2657.jsonl.gz
+```
+
+`part-1.parquet` holds the hour's records, the manifest names the batch it covers, and the item
+index says which hours `github.com/eyelock/ynr#12` appears in. The batch stays for another hour
+before it is deleted. Press Ctrl-C in terminal A, and `ynr query runs` gives the same answer as before.
+
 ## Clean up
 
 ```bash

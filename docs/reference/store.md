@@ -62,15 +62,22 @@ Readers use the parts for the batches a manifest lists, and still read any batch
 manifest does not list. The next compaction of the hour absorbs it into a new part and manifest.
 Batches are deleted an hour after compaction.
 
-A part has one row for each record, with the OpenTelemetry fields as columns (timestamp, trace and
-span ids, name, kind, status, resource and record attributes as maps, duration), `received_at`,
-`provenance`, `collector_id` and `collector_instance`, and the promoted columns listed in
-[Named queries](named-queries.md#promoted-columns).
+A manifest names its `signal`, `hour`, its number `n`, the `parts` and `batches` it covers, the number
+of `records`, and when it was `compacted`.
+
+A part has one row for each record. For spans the columns are `record_id`, `time`, `end_time`,
+`duration_ms`, `trace_id`, `span_id`, `parent_span_id`, `name`, `kind`, `status`, `status_message`,
+then the promoted columns listed in [Named queries](named-queries.md#promoted-columns) (`service`,
+`item_key`, `step_id`, `run_id`, `lane`, `harness`, `focus`, `repo`, `outcome`, `actor`, `model`,
+`provenance`, `collector_id`), `cost_usd`, `scope`, the `resource` and `attributes` as lists of
+key and value, and the batch `file` the record came from. Logs and metric points have the columns
+that suit them.
 
 ### Item index
 
-For each day, each item key with its first and last seen times, the hours it appears in and the trace
-id of each step. `ynr query item` reads only the hours it names.
+A Parquet file for each day with a row for each item and step in each hour: `item_key`, `hour`,
+`signal`, `step_id`, `trace_id`, `first_seen`, `last_seen` and the `manifest` it came from.
+`ynr query item` reads only the hours it names.
 
 ### Rollups
 
