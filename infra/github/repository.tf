@@ -57,5 +57,14 @@ resource "github_repository" "ynr" {
   }
 }
 
-# A docs site (GitHub Pages from /docs on main, as ynf and ynm have) is added once ynr has docs
-# beyond its ADRs; until then the homepage is the ADRs on develop.
+# The docs site, built by GitHub from /docs on main: docsify renders the Markdown in the browser,
+# so there is no build step. It goes live once this is applied and docs/ reaches main.
+resource "github_repository_pages" "ynr" {
+  repository = github_repository.ynr.name
+  build_type = "legacy"
+
+  source {
+    branch = "main"
+    path   = "/docs"
+  }
+}
