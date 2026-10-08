@@ -5,6 +5,7 @@
 #   make js        install and build the npm spool exporter (spoolexporter/js)
 #   make build     the slim build into bin/ynr (no cgo), plus linux builds for images
 #   make full      the full build, with DuckDB (cgo), into bin/ynr-full
+#   make install   the full build into ~/.ynr/bin/ynr (INSTALL_DIR to change it)
 #   make generate  the dashboard's templates into Go
 #   make test      the tests
 #   make fmt       format Go and Terraform
@@ -19,7 +20,7 @@ MODULES := . spoolexporter
 # The npm spool exporter.
 JS := spoolexporter/js
 
-.PHONY: check build full test vet lint fmt fmt-check slim-check generate generate-check help clean js js-test
+.PHONY: check build full install test vet lint fmt fmt-check slim-check generate generate-check help clean js js-test
 
 check: fmt-check generate-check vet lint slim-check js js-test test
 
@@ -43,6 +44,16 @@ build:
 
 full:
 	CGO_ENABLED=1 go build -tags full -trimpath -ldflags "$(LDFLAGS)" -o bin/ynr-full ./cmd/ynr
+
+INSTALL_DIR ?= $(HOME)/.ynr/bin
+
+# Copy to a temporary name, then rename over the old binary, as ynh, ynf and ynm do. Overwriting a
+# binary in place keeps the same file, and on macOS the kernel's cached code-signature check for it
+# can go stale: the next launch is killed with SIGKILL (exit 137) and no message.
+install: full
+	@mkdir -p $(INSTALL_DIR)
+	cp bin/ynr-full $(INSTALL_DIR)/.ynr.tmp && mv -f $(INSTALL_DIR)/.ynr.tmp $(INSTALL_DIR)/ynr
+	@$(INSTALL_DIR)/ynr version
 
 # Each module's tests, and ynr's again as the full build (ADR-001).
 test:
