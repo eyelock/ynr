@@ -74,3 +74,25 @@ resource "github_repository_ruleset" "this" {
     }
   }
 }
+
+# Main and develop must never be deleted or force-pushed by accident, admins included. This ruleset
+# has no bypass actors on purpose: the admin bypass on the rulesets above would otherwise let an
+# admin do exactly that. To remove or rewrite either branch, disable this ruleset first.
+resource "github_repository_ruleset" "never_delete" {
+  repository  = github_repository.ynr.name
+  name        = "Never Delete Main or Develop"
+  target      = "branch"
+  enforcement = "active"
+
+  conditions {
+    ref_name {
+      include = ["refs/heads/main", "refs/heads/develop"]
+      exclude = []
+    }
+  }
+
+  rules {
+    deletion         = true
+    non_fast_forward = true
+  }
+}
