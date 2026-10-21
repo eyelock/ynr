@@ -151,7 +151,11 @@ func TestShipsBatchesToTheStore(t *testing.T) {
 	if _, err := os.Stat(open); err != nil {
 		t.Error("the open file was deleted")
 	}
+	// Shipping is at least once (ADR-005): if shutdown lands between storing a batch and
+	// committing its position, the final flush ships the same lines again under a new name with
+	// the same source. Readers treat batches with one source as one, so count sources.
 	var traces, logs int
+	seen := map[string]bool{}
 	for _, key := range batches(t, storeDir) {
 		parts := strings.Split(key, "/")
 		if len(parts) != 7 || parts[5] != "laptop" {
@@ -159,6 +163,11 @@ func TestShipsBatchesToTheStore(t *testing.T) {
 			continue
 		}
 		name := parts[6]
+		source := parts[0] + "/" + name[strings.IndexByte(name, '_')+1:]
+		if seen[source] {
+			continue
+		}
+		seen[source] = true
 		switch {
 		case strings.HasSuffix(name, "_local.ynh-a-000001-0-"+strconv.Itoa(len(traceLine)+len(logLine)+2)+".jsonl.gz"):
 		case strings.HasSuffix(name, "_local.ynh-a-000002-0-"+strconv.Itoa(len(traceLine)+1)+".jsonl.gz"):
@@ -305,14 +314,21 @@ func TestShipsOnShutdownWithoutAStore(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if err := os.WriteFile(filepath.Join(root, "local", "ynh-2.jsonl"), []byte(traceLine+"\n"), 0o644); err != nil {
+	second := filepath.Join(root, "local", "ynh-2.jsonl")
+	if err := os.WriteFile(second, []byte(traceLine+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	cancel()
 	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("run: %v", err)
 	}
-	if n := seen(); n != 2 {
-		t.Fatalf("upstream saw %d trace exports, want 2: the line written before shutdown was not shipped", n)
+	// Delivery is at least once, so the upstream may see a line twice; what matters is that the
+	// line written before shutdown went out. A closed file is deleted only once its lines are
+	// shipped and committed, so its absence proves it.
+	if _, err := os.Stat(second); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("the file written before shutdown is still in the spool: the final poll did not ship it")
+	}
+	if n := seen(); n < 2 {
+		t.Fatalf("upstream saw %d trace exports, want at least 2", n)
 	}
 }
