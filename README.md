@@ -5,6 +5,9 @@ OpenTelemetry. Tools write telemetry into a crash-safe file spool; `ynr serve` r
 where each record came from, and ships it on. The design is in [the ADRs](docs/adr/README.md),
 and the build order in [ADR-009](docs/adr/009-walking-skeleton.md).
 
+**Documentation:** https://eyelock.github.io/ynr/ has a tutorial, how-to guides, a reference and
+explanations. It is built from [`docs/`](docs) on `main`, so it shows the latest release.
+
 **Status:** the walking skeleton's first slice is done and the second has begun. `ynr serve`
 (the slim build) reads the spool and ships stamped batches to a store, by default a folder on this
 machine, and can also forward to an OTLP/HTTP endpoint such as a local Jaeger. `ynr relay` receives
