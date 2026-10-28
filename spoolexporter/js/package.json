@@ -30,13 +30,13 @@
     "test": "npm run build && node --test \"test/*.test.mjs\""
   },
   "dependencies": {
-    "@opentelemetry/core": "^2.12.0",
-    "@opentelemetry/otlp-transformer": "^0.223.0"
+    "@opentelemetry/core": "^3.0.0",
+    "@opentelemetry/otlp-transformer": "^0.300.0"
   },
   "peerDependencies": {
     "@opentelemetry/sdk-logs": ">=0.222.0 <1",
-    "@opentelemetry/sdk-metrics": "^2.11.0",
-    "@opentelemetry/sdk-trace": "^2.11.0"
+    "@opentelemetry/sdk-metrics": "^3.0.0",
+    "@opentelemetry/sdk-trace": "^3.0.0"
   },
   "peerDependenciesMeta": {
     "@opentelemetry/sdk-logs": {
@@ -50,12 +50,12 @@
     }
   },
   "devDependencies": {
-    "@opentelemetry/api": "^1.9.1",
+    "@opentelemetry/api": "^1.10.0",
     "@opentelemetry/api-logs": "^0.223.0",
-    "@opentelemetry/resources": "^2.12.0",
-    "@opentelemetry/sdk-logs": "^0.223.0",
-    "@opentelemetry/sdk-metrics": "^2.11.0",
-    "@opentelemetry/sdk-trace": "^2.11.0",
+    "@opentelemetry/resources": "^3.0.0",
+    "@opentelemetry/sdk-logs": "^3.0.0",
+    "@opentelemetry/sdk-metrics": "^3.0.0",
+    "@opentelemetry/sdk-trace": "^3.0.0",
     "@types/node": "^24.19.2",
     "typescript": "^7.0.2"
   }
