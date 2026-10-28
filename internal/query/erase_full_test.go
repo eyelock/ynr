@@ -51,7 +51,7 @@ func rawActors(t *testing.T, dir string) int64 {
 	defer func() { _ = db.Close() }()
 	var n int64
 	if err := db.QueryRow(`SELECT count(*) FROM ` + parquet(parts) + ` WHERE actor = 'github.com/alice'
-  OR len(list_filter(attributes, a -> a.v = 'github.com/alice')) > 0`).Scan(&n); err != nil {
+  OR len(list_filter(attributes, lambda a: a.v = 'github.com/alice')) > 0`).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n

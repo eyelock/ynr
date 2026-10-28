@@ -248,6 +248,6 @@ func erasureSQL() string {
 	return fmt.Sprintf(`
 CREATE OR REPLACE MACRO erased(v) AS list_contains([%s]::VARCHAR[], v);
 CREATE OR REPLACE MACRO mask_attrs(l) AS
-  list_transform(l, a -> CASE WHEN a.k = 'user.name' AND erased(a.v) THEN struct_pack(k := a.k, v := '%s') ELSE a END);
+  list_transform(l, lambda a: CASE WHEN a.k = 'user.name' AND erased(a.v) THEN struct_pack(k := a.k, v := '%s') ELSE a END);
 `, strings.Join(quoted, ", "), Erased)
 }
