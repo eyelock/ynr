@@ -9,10 +9,10 @@ CREATE MACRO otel_str(v) AS coalesce(
 -- Attributes as a list of (k, v), not a map: a map refuses duplicate or null keys, and one bad
 -- record must not fail every query.
 CREATE MACRO otel_attrs(l) AS
-  coalesce(list_transform(l, a -> struct_pack(k := a.key, v := otel_str(a.value))), []);
+  coalesce(list_transform(l, lambda a: struct_pack(k := a.key, v := otel_str(a.value))), []);
 
 -- One attribute's value, or NULL.
-CREATE MACRO attr(l, key) AS list_filter(l, a -> a.k = key)[1].v;
+CREATE MACRO attr(l, key) AS list_filter(l, lambda a: a.k = key)[1].v;
 
 -- An attribute from the resource, where ynr stamps what a run's manifest says, else the record.
 CREATE MACRO pick(res, att, key) AS coalesce(attr(res, key), attr(att, key));
