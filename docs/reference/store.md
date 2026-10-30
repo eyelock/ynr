@@ -73,6 +73,14 @@ then the promoted columns listed in [Named queries](named-queries.md#promoted-co
 key and value, and the batch `file` the record came from. Logs and metric points have the columns
 that suit them.
 
+### Schema version
+
+Every Parquet file ynr writes (a part, the item index, a rollup) has the key `ynr.schema_version` in
+its file metadata, now `1`. A reader treats a file with no such key as version 1, and refuses a file
+whose version is higher than it knows, or is not a positive whole number, with an error naming the
+file, so an older ynr does not misread what a newer one wrote. Adding a column does not change the
+version, because readers match columns by name; changing the meaning or type of one does.
+
 ### Item index
 
 A Parquet file for each day with a row for each item and step in each hour: `item_key`, `hour`,

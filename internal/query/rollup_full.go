@@ -68,7 +68,7 @@ func rollMonth(ctx context.Context, r store.Reader, month time.Time) error {
 			if ok, err := exists(ctx, r, key); err != nil {
 				return err
 			} else if ok {
-				p, err := r.Local(ctx, key)
+				p, err := localFile(ctx, r, key)
 				if err != nil {
 					return err
 				}
@@ -106,7 +106,7 @@ func writeRollups(ctx context.Context, r store.Reader, t time.Time, period, setu
 	}
 	for kind, q := range map[string]string{store.RollupRuns: runs, store.RollupMetrics: metrics} {
 		out := filepath.Join(tmp, kind+".parquet")
-		if _, err := db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO %s (FORMAT parquet, COMPRESSION zstd)", q, literal(out))); err != nil {
+		if _, err := db.ExecContext(ctx, fmt.Sprintf("COPY (%s) TO %s (FORMAT parquet, COMPRESSION zstd, %s)", q, literal(out), schemaKV)); err != nil {
 			return fmt.Errorf("%s %s rollup for %s: %w", period, kind, t.Format("2006-01-02"), err)
 		}
 		b, err := os.ReadFile(out)
@@ -148,7 +148,7 @@ func rollupFiles(ctx context.Context, r store.Reader, kind string, since, until 
 				return nil, err
 			}
 			if ok {
-				p, err := r.Local(ctx, key)
+				p, err := localFile(ctx, r, key)
 				if err != nil {
 					return nil, err
 				}
@@ -163,7 +163,7 @@ func rollupFiles(ctx context.Context, r store.Reader, kind string, since, until 
 			return nil, err
 		}
 		if ok {
-			p, err := r.Local(ctx, key)
+			p, err := localFile(ctx, r, key)
 			if err != nil {
 				return nil, err
 			}
