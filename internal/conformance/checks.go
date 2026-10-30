@@ -23,6 +23,7 @@ type checker struct {
 	regErr  error
 	runs    map[string]*runOutcome
 	planted map[string]string
+	mem     memoryState
 	checks  []Check
 }
 
@@ -551,15 +552,6 @@ func (k *checker) rule12() {
 				r.Duration.Round(time.Millisecond), base.Duration.Round(time.Millisecond), allowed.Round(time.Millisecond)))
 		}
 	}
-}
-
-// rule13 needs ynm in the test.
-func (k *checker) rule13() {
-	if _, err := exec.LookPath("ynm"); err != nil {
-		k.skip(13, "never into memory", "ynm is not on the PATH")
-		return
-	}
-	k.skip(13, "never into memory", "ynm is on the PATH, but comparing its store before and after is not implemented yet")
 }
 
 // rule14: a ynr on the path, with nothing configured to start it, is never started.

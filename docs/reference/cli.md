@@ -188,7 +188,9 @@ ynr conformance [--file .ynr/conformance.yaml] [--format text|json] [--timeout 6
 | `--keep` | off | Keeps the temporary folders, for looking at what was written. |
 
 Exit 1 if any check fails, 30 if the file cannot be read. The stub vendor and the tool under test
-are found by bare name on `PATH`. The file's format is in
+are found by bare name on `PATH`, and so is `ynm`, for rule 13: with it present, each scenario's runs get a
+scratch `YNM_HOME` (other `YNM_*` variables are dropped), and the check fails if `ynm export` shows a record
+added, changed or removed, or a canary in one. Without `ynm` that rule is skipped. The file's format is in
 [Add ynr conformance to a tool's CI](../how-to/add-conformance-to-ci.md).
 
 ### ynr tail
