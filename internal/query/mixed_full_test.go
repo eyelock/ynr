@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,7 +135,7 @@ func TestMixedSchemaStoreReadsEverywhere(t *testing.T) {
 		t.Fatalf("compacted %d hours, %v", n, err)
 	}
 	// The old day's files are what v0.2.2 would have left: its parts, item index and rollups.
-	var nOld, nNew int
+	var oldFiles, newFiles []string
 	for _, prefix := range []string{"compacted/", "index/", "rollups/"} {
 		for _, k := range keys(t, r, prefix) {
 			if !strings.HasSuffix(k, ".parquet") {
@@ -142,20 +143,27 @@ func TestMixedSchemaStoreReadsEverywhere(t *testing.T) {
 			}
 			if onDay(k, oldDay) {
 				downgrade(t, r, k)
-				nOld++
-				if v, recv := schemaOf(t, r, k); v != "" || recv {
-					t.Errorf("%s: version %q, received_at %v; want the v0.2.2 layout", k, v, recv)
-				}
+				oldFiles = append(oldFiles, k)
 			} else if onDay(k, newDay) {
-				nNew++
-				if v, recv := schemaOf(t, r, k); v != "2" || (strings.HasPrefix(k, "compacted/") && !recv) {
-					t.Errorf("%s: version %q, received_at %v; want version 2", k, v, recv)
-				}
+				newFiles = append(newFiles, k)
 			}
 		}
 	}
-	if nOld != 6 || nNew != 6 { // a part each of traces, logs and metrics, the item index, two rollups
-		t.Fatalf("%d old and %d new Parquet files", nOld, nNew)
+	// A bucket reader keeps a part it has fetched, since a part never changes: read the rewritten
+	// files through a reader with an empty cache.
+	r = withFreshCache(t, r)
+	for _, k := range oldFiles {
+		if v, recv := schemaOf(t, r, k); v != "" || recv {
+			t.Errorf("%s: version %q, received_at %v; want the v0.2.2 layout", k, v, recv)
+		}
+	}
+	for _, k := range newFiles {
+		if v, recv := schemaOf(t, r, k); v != "2" || (strings.HasPrefix(k, "compacted/") && !recv) {
+			t.Errorf("%s: version %q, received_at %v; want version 2", k, v, recv)
+		}
+	}
+	if len(oldFiles) != 6 || len(newFiles) != 6 { // a part each of traces, logs and metrics, the item index, two rollups
+		t.Fatalf("%d old and %d new Parquet files", len(oldFiles), len(newFiles))
 	}
 
 	h := openHot(t, filepath.Join(t.TempDir(), "hot.duckdb"), r)
@@ -211,6 +219,23 @@ func TestMixedSchemaStoreReadsEverywhere(t *testing.T) {
 	}
 	t.Run("direct after recompaction", func(t *testing.T) { mixedQueries(t, direct, 3) })
 	t.Run("rebuilt hot after recompaction", func(t *testing.T) { mixedQueries(t, hot(h2), 3) })
+}
+
+// withFreshCache opens the store again, with an empty cache if it is a bucket.
+func withFreshCache(t *testing.T, r store.Reader) store.Reader {
+	t.Helper()
+	raw := r.URL()
+	if u, err := url.Parse(raw); err == nil && u.Scheme == "s3" {
+		q := u.Query()
+		q.Set("cache", t.TempDir())
+		u.RawQuery = q.Encode()
+		raw = u.String()
+	}
+	fresh, err := store.OpenReader(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fresh
 }
 
 // onDay reports whether a part, index or rollup key is of the day's records.
