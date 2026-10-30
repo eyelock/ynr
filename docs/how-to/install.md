@@ -22,7 +22,8 @@ Expected:
 Each release has two archives for each platform: `ynr_<version>_<os>_<arch>.tar.gz` is the slim
 build (what ynh's base image and a tool's CI download) and `ynr-full_<version>_<os>_<arch>.tar.gz`
 is the full build (what Homebrew installs). The slim name is stable. Each is an archive for `darwin` and `linux` on `amd64` and `arm64`; the release also has a `checksums.txt`
-signed with cosign, and SBOMs. Download, check against the checksums, and unpack:
+signed with cosign, and SBOMs. The linux binaries need only glibc (2.25 or newer, so Ubuntu 22.04 and Debian 12 run them); libstdc++
+is linked in. Download, check against the checksums, and unpack:
 
 ```bash
 V=0.2.2

@@ -41,6 +41,8 @@ full archives, `ynr-full_<version>_<os>_<arch>`, hold the build with DuckDB, and
 installs that one, so `brew install eyelock/tap/ynr` has `query`, `central` and `--ui`. The release
 workflow builds the full binaries for all four platforms on one macOS runner: clang for the two
 darwin ones and GCC cross toolchains for the two linux ones, because DuckDB's prebuilt static
-libraries need libstdc++. A clone can still make the full build with `make install`.
+libraries need libstdc++. The linux binaries link libstdc++ and libgcc statically, so a host needs only
+glibc (2.25 or newer) and not the toolchain's newer libstdc++; a check in the release build stops it if one slips
+back to a dynamic link. A clone can still make the full build with `make install`.
 
 See [ADR-001](../adr/001-positioning.md).
