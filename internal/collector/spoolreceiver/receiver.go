@@ -108,6 +108,7 @@ func (r *spoolReceiver) Start(_ context.Context, _ component.Host) error {
 			return
 		}
 		reader.RunUser = r.runUser
+		reader.RunBudget = r.runBudget
 		if r.cfg.Store != "" {
 			st, err := store.Open(r.cfg.Store)
 			if err != nil {
@@ -235,7 +236,7 @@ func (r *spoolReceiver) logCounts(msg string) {
 	s := r.reader.Counters.Snapshot()
 	r.logger.Info(msg, zap.Int64("lines", s.Lines), zap.Int64("deleted_files", s.Deleted),
 		zap.Int64("ignored", s.Ignored), zap.Int64("rejected", s.Rejected),
-		zap.Int64("oversized", s.Oversized), zap.Int64("malformed", s.Malformed),
+		zap.Int64("oversized", s.Oversized), zap.Int64("malformed", s.Malformed), zap.Int64("over_budget", s.OverBudget),
 		zap.Int64("evicted_files", s.Evicted), zap.Int64("evicted_bytes", s.EvictedBytes),
 		zap.Int64("batches_stored", r.batches.Load()), zap.Int64("forward_errors", r.forwardErr.Load()))
 }
@@ -271,7 +272,7 @@ func (r *spoolReceiver) handle(ctx context.Context, w spool.Writer, line []byte)
 			return spool.ErrMalformed
 		}
 		for i := 0; i < td.ResourceSpans().Len(); i++ {
-			stamp.Resource(td.ResourceSpans().At(i).Resource().Attributes(), w, id, mr.m, mr.warning)
+			stamp.Resource(td.ResourceSpans().At(i).Resource().Attributes(), w, id, mr.m, r.warning(w, mr))
 			if r.checker != nil {
 				r.checker.Traces(td.ResourceSpans().At(i))
 			}
@@ -286,7 +287,7 @@ func (r *spoolReceiver) handle(ctx context.Context, w spool.Writer, line []byte)
 			return spool.ErrMalformed
 		}
 		for i := 0; i < ld.ResourceLogs().Len(); i++ {
-			stamp.Resource(ld.ResourceLogs().At(i).Resource().Attributes(), w, id, mr.m, mr.warning)
+			stamp.Resource(ld.ResourceLogs().At(i).Resource().Attributes(), w, id, mr.m, r.warning(w, mr))
 			if r.checker != nil {
 				r.checker.Logs(ld.ResourceLogs().At(i))
 			}
@@ -301,7 +302,7 @@ func (r *spoolReceiver) handle(ctx context.Context, w spool.Writer, line []byte)
 			return spool.ErrMalformed
 		}
 		for i := 0; i < md.ResourceMetrics().Len(); i++ {
-			stamp.Resource(md.ResourceMetrics().At(i).Resource().Attributes(), w, id, mr.m, mr.warning)
+			stamp.Resource(md.ResourceMetrics().At(i).Resource().Attributes(), w, id, mr.m, r.warning(w, mr))
 			if r.checker != nil {
 				r.checker.Metrics(md.ResourceMetrics().At(i))
 			}
@@ -331,6 +332,18 @@ func (r *spoolReceiver) runUser(w spool.Writer) (uint32, bool) {
 		return *mr.m.UID, true
 	}
 	return 0, false
+}
+
+// runBudget is how many bytes may be read from the run's folder: its manifest's, else the default.
+func (r *spoolReceiver) runBudget(w spool.Writer) int64 { return r.manifest(w).m.Budget() }
+
+// warning is the provenance warning for a run's records: a folder cut off for its budget, else
+// what its manifest said.
+func (r *spoolReceiver) warning(w spool.Writer, mr manifestResult) string {
+	if r.reader.OverBudget(w) {
+		return stamp.OverBudget
+	}
+	return mr.warning
 }
 
 // manifest returns the run's manifest, read once per poll.

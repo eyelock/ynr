@@ -113,3 +113,14 @@ func TestResourceStampsReceivedAtAndInstance(t *testing.T) {
 		t.Errorf("instance = %q", v)
 	}
 }
+
+func TestManifestBudget(t *testing.T) {
+	m, ok := ParseManifest([]byte(`{"run":"r","lane":"l","run_quota_bytes":1000}`), "r")
+	if !ok || m.Budget() != 1000 {
+		t.Errorf("budget = %v", m)
+	}
+	m, _ = ParseManifest([]byte(`{"run":"r","lane":"l"}`), "r")
+	if m.Budget() != spool.DefaultRunBudget {
+		t.Errorf("default budget = %d", m.Budget())
+	}
+}

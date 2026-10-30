@@ -6,7 +6,7 @@ package names
 const (
 	// How far the record can be trusted, decided by the spool folder it was written in and never by the record (ADR-003).
 	AttrProvenance = "ynr.provenance"
-	// Why a run's records carry no factory attributes.
+	// Why a run's records carry no factory attributes, or why a run folder was cut off.
 	AttrProvenanceWarning = "ynr.provenance.warning"
 	// The collector that stamped the record: a runner pool or a host (ADR-003).
 	AttrCollectorID = "ynr.collector.id"
@@ -48,6 +48,8 @@ const (
 	ProvenanceWarningNoManifest = "no-manifest"
 	// A run's records whose manifest was refused.
 	ProvenanceWarningBadManifest = "bad-manifest"
+	// A run folder that exceeded its budget
+	ProvenanceWarningOverBudget = "over-budget"
 )
 
 // Values of ynr.registry.
