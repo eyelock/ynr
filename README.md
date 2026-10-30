@@ -21,6 +21,9 @@ when no server is running. Compaction and the dashboard follow.
 brew install eyelock/tap/ynr
 ```
 
+This is the full build, with DuckDB. The slim build is a separate download on each release; see
+[Install ynr](docs/how-to/install.md).
+
 ## Try it
 
 ```bash
