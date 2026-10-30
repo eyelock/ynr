@@ -53,7 +53,12 @@ The agent can write straight into its folder, so the reader reads nothing on tru
 The environment, not ynr, enforces disk quotas on a run folder, because a reader cannot stop a disk
 filling. Where the runner cannot give per-run quotas, the spool lives on a filesystem of its own, so a
 run can fill it and cost the job its remaining telemetry, but cannot stall ynf. Those guarantees
-belong to ynf.
+belong to ynf. `ynr serve` is the backstop: each run folder has a budget, the manifest's
+`run_quota_bytes` (ynf's `telemetry.run_quota`) or 64 MiB, counted in bytes read. Once a folder has
+been read up to its budget, ynr stops reading it, leaves the rest of its files for ynf's run capture,
+counts it, and stamps `ynr.provenance.warning=over-budget` on the records it did ship from the file
+it was cutting off. It replaces a `no-manifest` or `bad-manifest` warning on those records. Other
+folders keep flowing. The count restarts if `ynr serve` does.
 
 ## Central trusts collectors, not stamps
 

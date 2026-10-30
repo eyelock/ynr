@@ -50,6 +50,17 @@ type Manifest struct {
 	// UID is the user the run writes as, when that is not the run folder's owner: a run in an
 	// image writes as the image's user. ynr then accepts the run's files from that user too.
 	UID *uint32 `json:"uid,omitempty"`
+	// RunQuotaBytes is how many bytes ynr reads from the run's folder before it stops and warns
+	// (ADR-003): ynf's telemetry.run_quota. Zero, or absent, means spool.DefaultRunBudget.
+	RunQuotaBytes int64 `json:"run_quota_bytes,omitempty"`
+}
+
+// Budget is how many bytes may be read from the run's folder.
+func (m *Manifest) Budget() int64 {
+	if m == nil || m.RunQuotaBytes <= 0 {
+		return spool.DefaultRunBudget
+	}
+	return m.RunQuotaBytes
 }
 
 // ParseManifest parses a manifest and checks it names the run whose folder it is for.
@@ -65,6 +76,7 @@ func ParseManifest(b []byte, runID string) (*Manifest, bool) {
 const (
 	NoManifest  = names.ProvenanceWarningNoManifest
 	BadManifest = names.ProvenanceWarningBadManifest
+	OverBudget  = names.ProvenanceWarningOverBudget
 )
 
 // Resource stamps one resource's attributes. Every ynr.* attribute the sender set is removed
@@ -83,10 +95,10 @@ func Resource(attrs pcommon.Map, w spool.Writer, id Identity, m *Manifest, warni
 	for _, k := range factoryKeys {
 		attrs.Remove(k)
 	}
+	if warning != "" {
+		attrs.PutStr(ProvenanceWarning, warning)
+	}
 	if m == nil {
-		if warning != "" {
-			attrs.PutStr(ProvenanceWarning, warning)
-		}
 		return
 	}
 	attrs.PutStr(RunID, m.Run)

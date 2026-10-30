@@ -33,6 +33,10 @@ const (
 	ClosedSuffix = ".jsonl"
 )
 
+// DefaultRunBudget is how many bytes are read from a run folder when its manifest names no budget:
+// ynf's default run quota (ADR-003).
+const DefaultRunBudget = 64 << 20
+
 // Reader reads a spool root.
 type Reader struct {
 	Root     string
@@ -42,6 +46,11 @@ type Reader struct {
 	// run's reach. A run in an image writes as the image's user, not the folder's owner, so its
 	// files are accepted from that user too. Nil, or false, accepts only the folder's owner.
 	RunUser func(w Writer) (uid uint32, ok bool)
+	// RunBudget returns how many bytes may be read from a run's folder (ADR-003). Past it the
+	// reader stops reading that folder, counts it in Counters.OverBudget, and OverBudget(w) is
+	// true, so the handler can mark the records still shipped. Nil means no limit. A budget
+	// counts bytes read since the reader started.
+	RunBudget func(w Writer) int64
 
 	// Ship, when set, makes the reader batch (ADR-005): a file is read only once it is due,
 	// and after its new lines have gone to the handler, Ship is called with the file's source
@@ -56,6 +65,8 @@ type Reader struct {
 	Force bool
 
 	pos     *positions
+	used    map[string]int64     // bytes read from each run folder
+	over    map[string]bool      // run folders cut off for exceeding their budget
 	pending map[string]time.Time // when each file's unshipped bytes were first seen
 	now     func() time.Time
 
@@ -102,7 +113,7 @@ func NewReader(root string, maxLine int) (*Reader, error) {
 	if maxLine <= 0 {
 		maxLine = DefaultMaxLine
 	}
-	return &Reader{Root: root, MaxLine: maxLine, Counters: &Counters{}, pos: pos, pending: map[string]time.Time{}, now: time.Now}, nil
+	return &Reader{Root: root, MaxLine: maxLine, Counters: &Counters{}, pos: pos, used: map[string]int64{}, over: map[string]bool{}, pending: map[string]time.Time{}, now: time.Now}, nil
 }
 
 // Poll reads every writer folder once, handing each new complete line to h. A file's position
@@ -185,6 +196,26 @@ func (r *Reader) pollWriter(ctx context.Context, w Writer, h Handler, seen map[s
 	return nil
 }
 
+// OverBudget reports whether the run's folder is, or is about to be, cut off for exceeding its
+// budget. The handler asks it for each line, so the lines read before the cut carry the warning.
+func (r *Reader) OverBudget(w Writer) bool { return r.over[w.Rel] }
+
+// budgetLeft returns how many more bytes may be read from a run's folder, and whether a budget
+// applies.
+func (r *Reader) budgetLeft(w Writer) (int64, bool) {
+	if r.RunBudget == nil || w.Class != Run || r.follow {
+		return 0, false
+	}
+	return max(r.RunBudget(w)-r.used[w.Rel], 0), true
+}
+
+func (r *Reader) cutOff(w Writer) {
+	if !r.over[w.Rel] {
+		r.over[w.Rel] = true
+		r.Counters.OverBudget.Add(1)
+	}
+}
+
 func (r *Reader) pollFile(w Writer, path string, owners []uint32, dev uint64, h Handler, seen map[string]bool) error {
 	f, id, size, err := openSafe(path, owners, dev)
 	if err != nil {
@@ -214,7 +245,16 @@ func (r *Reader) pollFile(w Writer, path string, owners []uint32, dev uint64, h 
 	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return err
 	}
-	consumed, handErr := r.readLines(w, bufio.NewReaderSize(io.LimitReader(f, size-offset), 64<<10), h)
+	// Whole lines are read while they fit the run's budget; the rest stays unread in the file.
+	limit, cut := size-offset, false
+	if left, ok := r.budgetLeft(w); ok && limit > left {
+		limit, cut = left, true
+		r.cutOff(w)
+	}
+	consumed, handErr := r.readLines(w, bufio.NewReaderSize(io.LimitReader(f, limit), 64<<10), h)
+	if w.Class == Run && !r.follow {
+		r.used[w.Rel] += consumed
+	}
 	if r.Ship != nil && consumed > 0 {
 		if err := r.Ship(w, Source(w, path), offset, offset+consumed); err != nil {
 			return fmt.Errorf("%s: shipping: %w", w.Rel, err)
@@ -222,6 +262,14 @@ func (r *Reader) pollFile(w Writer, path string, owners []uint32, dev uint64, h 
 	}
 	delete(r.pending, key)
 	committed := offset + consumed
+	if cut {
+		// Never deleted or counted malformed: it is left for ynf's run capture.
+		r.pos.Files[key] = committed
+		if err := r.pos.save(); err != nil {
+			return err
+		}
+		return handErr
+	}
 	if handErr == nil && closed && committed < size {
 		// A closed file ending without a newline: the remainder can never become a line.
 		r.Counters.Malformed.Add(1)

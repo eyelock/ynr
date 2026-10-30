@@ -3,8 +3,10 @@ package spoolreceiver
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"go.opentelemetry.io/collector/component/componenttest"
@@ -174,5 +176,35 @@ func TestRunUserComesFromTheManifest(t *testing.T) {
 	}
 	if _, ok := r.runUser(spool.Writer{Class: spool.Local, Name: "local"}); ok {
 		t.Error("only runs have a run user")
+	}
+}
+
+func TestRunOverItsManifestBudgetIsCutOffAndWarned(t *testing.T) {
+	n := int64(len(traceLine) + 1)
+	root := spoolWith(t, map[string]string{
+		"manifests/r1.json":   fmt.Sprintf(`{"run":"r1","lane":"github.com/x#a","run_quota_bytes":%d}`, 2*n),
+		"manifests/r2.json":   `{"run":"r2","lane":"github.com/x#a"}`,
+		"runs/r1/ynh-a.jsonl": strings.Repeat(traceLine+"\n", 5),
+		"runs/r2/ynh-b.jsonl": strings.Repeat(traceLine+"\n", 5),
+	})
+	traces := new(consumertest.TracesSink)
+	r := start(t, root, sinks{traces, new(consumertest.LogsSink), consumertest.NewNop()})
+	if err := r.PollOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	counts, warned := map[string]int{}, map[string]string{}
+	for _, td := range traces.AllTraces() {
+		run := resourceAttr(td, stamp.RunID)
+		counts[run]++
+		warned[run] = resourceAttr(td, stamp.ProvenanceWarning)
+	}
+	if counts["r1"] != 2 || counts["r2"] != 5 {
+		t.Fatalf("records by run: %v", counts)
+	}
+	if warned["r1"] != stamp.OverBudget || warned["r2"] != "" {
+		t.Errorf("warnings: %v", warned)
+	}
+	if s := r.reader.Counters.Snapshot(); s.OverBudget != 1 {
+		t.Errorf("counters %+v", s)
 	}
 }

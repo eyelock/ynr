@@ -18,6 +18,8 @@ type Counters struct {
 	Deleted atomic.Int64
 	// Evicted and EvictedBytes count closed files deleted unshipped because the spool reached
 	// its cap (ynr.spool.evicted): data lost to an outage.
+	// OverBudget counts run folders cut off for exceeding their budget (ADR-003).
+	OverBudget   atomic.Int64
 	Evicted      atomic.Int64
 	EvictedBytes atomic.Int64
 }
@@ -25,7 +27,7 @@ type Counters struct {
 // Snapshot is a point-in-time copy of Counters.
 type Snapshot struct {
 	Ignored, Rejected, Oversized, Malformed, Lines, Deleted int64
-	Evicted, EvictedBytes                                   int64
+	Evicted, EvictedBytes, OverBudget                       int64
 }
 
 // Snapshot copies the counters.
@@ -34,5 +36,6 @@ func (c *Counters) Snapshot() Snapshot {
 		Ignored: c.Ignored.Load(), Rejected: c.Rejected.Load(), Oversized: c.Oversized.Load(),
 		Malformed: c.Malformed.Load(), Lines: c.Lines.Load(), Deleted: c.Deleted.Load(),
 		Evicted: c.Evicted.Load(), EvictedBytes: c.EvictedBytes.Load(),
+		OverBudget: c.OverBudget.Load(),
 	}
 }
