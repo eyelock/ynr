@@ -34,6 +34,11 @@ groups:
         stability: development
         brief: The job within the collector's pool, recorded as data and never as identity.
         examples: ["job-9"]
+      - id: ynr.received_at
+        type: string
+        stability: development
+        brief: When ynr received the record, as an RFC 3339 time in UTC; stamped by ynr and never taken from the record (ADR-005).
+        examples: ["2026-10-08T10:30:31.250Z"]
       - id: ynr.registry
         type:
           members:

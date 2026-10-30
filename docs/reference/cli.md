@@ -167,7 +167,7 @@ ynr telemetry registry [--format text|json]
 ```
 
 Prints the names ynr itself writes: `ynr.provenance`, `ynr.provenance.warning`, `ynr.collector.id`,
-`ynr.collector.instance`, `ynr.registry`, `ynr.registry.name`, and the metrics `ynr.spool.evicted` and
+`ynr.collector.instance`, `ynr.received_at`, `ynr.registry`, `ynr.registry.name`, and the metrics `ynr.spool.evicted` and
 `ynr.registry.unknown_names`. `--format json` prints the registry as JSON, in the shape every YN tool's
 `telemetry registry --format json` prints: `tool`, `version`, `semantic_conventions`, `attributes`,
 `spans`, `events` and `metrics`.

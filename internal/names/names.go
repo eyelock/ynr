@@ -12,6 +12,8 @@ const (
 	AttrCollectorID = "ynr.collector.id"
 	// The job within the collector's pool, recorded as data and never as identity.
 	AttrCollectorInstance = "ynr.collector.instance"
+	// When ynr received the record, as an RFC 3339 time in UTC; stamped by ynr and never taken from the record (ADR-005).
+	AttrReceivedAt = "ynr.received_at"
 	// Set only when ynr has no learned registry for the record's service.name and service.version (ADR-007); the record is kept.
 	AttrRegistry = "ynr.registry"
 	// A name a record used that its tool's registry does not declare. Only on ynr.registry.unknown_names, and capped.

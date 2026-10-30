@@ -2,6 +2,7 @@ package stamp
 
 import (
 	"testing"
+	"time"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 
@@ -96,5 +97,19 @@ func TestParseManifest_UID(t *testing.T) {
 	}
 	if _, ok := ParseManifest([]byte(`{"run":"r1","lane":"l","uid":-1}`), "r1"); ok {
 		t.Fatal("accepted a negative uid")
+	}
+}
+
+func TestResourceStampsReceivedAtAndInstance(t *testing.T) {
+	old := Now
+	defer func() { Now = old }()
+	Now = func() time.Time { return time.Date(2026, 10, 8, 10, 30, 31, 250e6, time.UTC) }
+	a := attrs(map[string]string{ReceivedAt: "1999-01-01T00:00:00Z"}) // a sender's claim
+	Resource(a, spool.Writer{Class: spool.Local, Name: "local"}, Identity{ID: "c", Instance: "job-9"}, nil, "")
+	if v, _ := str(a, ReceivedAt); v != "2026-10-08T10:30:31.250Z" {
+		t.Errorf("received_at = %q", v)
+	}
+	if v, _ := str(a, CollectorInstance); v != "job-9" {
+		t.Errorf("instance = %q", v)
 	}
 }
