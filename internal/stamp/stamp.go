@@ -6,6 +6,7 @@ package stamp
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 
@@ -20,6 +21,7 @@ const (
 	ProvenanceWarning = names.AttrProvenanceWarning
 	CollectorID       = names.AttrCollectorID
 	CollectorInstance = names.AttrCollectorInstance
+	ReceivedAt        = names.AttrReceivedAt
 
 	Lane        = "ynf.lane"
 	LaneHarness = "ynf.lane.harness"
@@ -67,6 +69,9 @@ const (
 	BadManifest = names.ProvenanceWarningBadManifest
 )
 
+// Now is the clock that says when ynr received a record; tests replace it.
+var Now = time.Now
+
 // Resource stamps one resource's attributes. Every ynr.* attribute the sender set is removed
 // first. For a run, the factory attributes are removed too and set only from the manifest; m is
 // nil when there is none, and warning says why.
@@ -74,6 +79,7 @@ func Resource(attrs pcommon.Map, w spool.Writer, id Identity, m *Manifest, warni
 	attrs.RemoveIf(func(k string, _ pcommon.Value) bool { return strings.HasPrefix(k, "ynr.") })
 	attrs.PutStr(Provenance, string(w.Class))
 	attrs.PutStr(CollectorID, id.ID)
+	attrs.PutStr(ReceivedAt, Now().UTC().Format("2006-01-02T15:04:05.000Z"))
 	if id.Instance != "" {
 		attrs.PutStr(CollectorInstance, id.Instance)
 	}

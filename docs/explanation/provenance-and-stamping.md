@@ -60,7 +60,8 @@ belong to ynf.
 In the cloud, many machines ship to one bucket. A **collector** is a runner pool or a host, never a
 single job, and its id is part of its configuration. Each collector may write only its own segment of
 the bucket, so the segment is its verified identity, and central stamps `ynr.collector.id` from it.
-The job a record came from is data, `ynr.collector.instance`, not identity.
+The job a record came from is data, `ynr.collector.instance`, not identity. ynr also stamps
+`ynr.received_at`, the time it received the record, replacing anything the sender set.
 
 Central's configuration lists which collectors may carry `factory` or `service` provenance. A record
 claiming either from any other collector, a laptop for instance, is marked unverified. The reader

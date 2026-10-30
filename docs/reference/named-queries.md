@@ -145,6 +145,8 @@ a tool has its own name for the same thing, the first one present wins.
 | `model` | `gen_ai.response.model`, else `gen_ai.request.model` |
 | `provenance` | `ynr.provenance` |
 | `collector_id` | `ynr.collector.id` |
+| `collector_instance` | `ynr.collector.instance` |
+| `received_at` | `ynr.received_at`, as a time in UTC |
 
 A span's `cost_usd` is `ynh.run.cost_usd`. A record is kept once: a span by its trace id and span id,
 and a log record or metric point by a hash of its content and resource, so a batch shipped twice is
