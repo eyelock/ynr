@@ -16,12 +16,11 @@ Expected:
 
 ```text
 ynr: dashboard at http://127.0.0.1:4319/
-2026-10-08T11:30:54.888+0100	info	service@v0.162.0/service.go:256	Everything is ready. Begin running and processing data.
 ```
 
-Between those lines are a few more `info` lines from the OpenTelemetry Collector that `ynr serve`
-is built on. `ynr serve` runs in the foreground and logs to this terminal until you press Ctrl-C.
-Leave it running.
+`ynr serve` runs in the foreground and logs to this terminal until you press Ctrl-C. It says
+nothing more unless something is wrong: the OpenTelemetry Collector it is built on reports only
+warnings and errors, as `ynr: collector warn: ...` lines. Leave it running.
 
 It creates the spool the first time it starts. In terminal C, look:
 

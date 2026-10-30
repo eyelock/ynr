@@ -69,9 +69,17 @@ A part has one row for each record. For spans the columns are `record_id`, `time
 `duration_ms`, `trace_id`, `span_id`, `parent_span_id`, `name`, `kind`, `status`, `status_message`,
 then the promoted columns listed in [Named queries](named-queries.md#promoted-columns) (`service`,
 `item_key`, `step_id`, `run_id`, `lane`, `harness`, `focus`, `repo`, `outcome`, `actor`, `model`,
-`provenance`, `collector_id`), `cost_usd`, `scope`, the `resource` and `attributes` as lists of
+`provenance`, `collector_id`, `collector_instance`, `received_at`), `cost_usd`, `scope`, the `resource` and `attributes` as lists of
 key and value, and the batch `file` the record came from. Logs and metric points have the columns
 that suit them.
+
+### Schema version
+
+Every Parquet file ynr writes (a part, the item index, a rollup) has the key `ynr.schema_version` in
+its file metadata, now `1`. A reader treats a file with no such key as version 1, and refuses a file
+whose version is higher than it knows, or is not a positive whole number, with an error naming the
+file, so an older ynr does not misread what a newer one wrote. Adding a column does not change the
+version, because readers match columns by name; changing the meaning or type of one does.
 
 ### Item index
 

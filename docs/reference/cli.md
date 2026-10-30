@@ -90,12 +90,12 @@ Runs in the foreground until Ctrl-C or `SIGTERM`.
 | `--erase` | none | A file of handles to erase, one on each line. `YNR_ERASE`. |
 | `--ui` | off | **full.** Serves the local dashboard on this address, which must be loopback (`127.0.0.1`, `::1` or `localhost`). `YNR_UI`. |
 | `--registry-tools` | none | Tools whose telemetry registries to learn at startup, comma separated, each run by bare name on `PATH` as `<tool> telemetry registry --format json`. A tool that is missing or fails is logged and skipped. `YNR_REGISTRY_TOOLS`. |
-| `--debug` | off | Also prints a summary of what is shipped. |
+| `--debug` | off | Also prints a summary of what is shipped, and the embedded Collector's info-level log lines (`ynr: collector info: ...`), which are otherwise left out: only its warnings and errors show. |
 
 At least one of `--store` and `--upstream` is needed. In the full build `ynr serve` also keeps the
 hot tier, compacts, and answers `ynr query` on a
 Unix socket: `serve.sock` in the spool's `.ynr` folder, or under the temporary directory when that
-path is too long for a socket.
+path is too long for a socket. `ynr query` and `ynr doctor` derive the same path from the spool root.
 
 ### ynr central
 
@@ -115,7 +115,7 @@ ynr central --store <url> [--hot-window 6h] [--socket <path>] [--state <folder>]
 | `--store` | none | The shared object store to read. Required. `YNR_STORE`. |
 | `--hot-window` | `6h` | How far back the hot tier holds records. |
 | `--state` | `$XDG_STATE_HOME/ynr/central`, or `~/.local/state/ynr/central` | The folder for the hot tier's database, which only this user can open. A cache: deleting it loses nothing. `YNR_CENTRAL_STATE`. |
-| `--socket` | `central.sock` in `--state` | The Unix socket to answer queries on. `YNR_CENTRAL_SOCKET`. |
+| `--socket` | `central.sock` in `--state` | The Unix socket to answer queries on. When that path is too long for a socket, the default is a name derived from the absolute `--state` under the temporary directory. `YNR_CENTRAL_SOCKET`. |
 | `--poll` | `5s` | How often to poll the store for new batches. |
 | `--compact-lookback` | `24h` | How far back hours are compacted. |
 | `--compact-every` | `5m` | How often compaction runs. |
@@ -167,7 +167,7 @@ ynr telemetry registry [--format text|json]
 ```
 
 Prints the names ynr itself writes: `ynr.provenance`, `ynr.provenance.warning`, `ynr.collector.id`,
-`ynr.collector.instance`, `ynr.registry`, `ynr.registry.name`, and the metrics `ynr.spool.evicted` and
+`ynr.collector.instance`, `ynr.received_at`, `ynr.registry`, `ynr.registry.name`, and the metrics `ynr.spool.evicted` and
 `ynr.registry.unknown_names`. `--format json` prints the registry as JSON, in the shape every YN tool's
 `telemetry registry --format json` prints: `tool`, `version`, `semantic_conventions`, `attributes`,
 `spans`, `events` and `metrics`.
@@ -188,7 +188,9 @@ ynr conformance [--file .ynr/conformance.yaml] [--format text|json] [--timeout 6
 | `--keep` | off | Keeps the temporary folders, for looking at what was written. |
 
 Exit 1 if any check fails, 30 if the file cannot be read. The stub vendor and the tool under test
-are found by bare name on `PATH`. The file's format is in
+are found by bare name on `PATH`, and so is `ynm`, for rule 13: with it present, each scenario's runs get a
+scratch `YNM_HOME` (other `YNM_*` variables are dropped), and the check fails if `ynm export` shows a record
+added, changed or removed, or a canary in one. Without `ynm` that rule is skipped. The file's format is in
 [Add ynr conformance to a tool's CI](../how-to/add-conformance-to-ci.md).
 
 ### ynr tail
@@ -225,12 +227,12 @@ before or after the flags.
 | `--lane` | all | Only this lane's records, where the query takes one. |
 | `--format` | `text` | `text` or `json`: `query`, `since`, `until`, `columns` and `rows`. |
 | `--spool` | the spool root | The spool root of the `ynr serve` to ask. `YNR_SPOOL_ROOT`. |
-| `--socket` | none | The Unix socket of the `ynr central` to ask. `YNR_CENTRAL_SOCKET`. |
+| `--socket` | none | The Unix socket of the `ynr central` to ask. Without it, `ynr query` asks the `ynr central` whose state folder is `YNR_CENTRAL_STATE` (default `$XDG_STATE_HOME/ynr/central`), at the same default socket central derives, however long that folder's path. `YNR_CENTRAL_SOCKET`. |
 | `--store` | the laptop folder store | Read this store directly, instead of asking a server. `YNR_STORE`. |
 | `--erase` | none | A file of handles to mask, for a direct read. `YNR_ERASE`. |
 
 Where the answer comes from, in order: if `--store` is given, the store is read directly; otherwise
-the server at `--socket`, or the `ynr serve` on `--spool`, is asked; and if no `ynr serve` answers,
+the server at `--socket` is asked, or else the `ynr serve` on `--spool` and then the `ynr central` on the default state folder; and if none answers,
 the store is read directly. A given `--socket` that nothing answers is an error (exit 20), not a
 fallback. The slim build can only ask a running full `ynr serve`.
 

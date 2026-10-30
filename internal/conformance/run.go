@@ -112,6 +112,7 @@ func (s *sandbox) execRun(ctx context.Context, kind, command string) (*runOutcom
 		"TRACEPARENT":              "00-" + out.TraceID + "-" + out.SpanID + "-01",
 		"OTEL_RESOURCE_ATTRIBUTES": "conformance.marker=" + out.Marker,
 		"YNR_CONFORMANCE_ROOT":     s.invoked,
+		"YNM_HOME":                 s.memoryHome(), // a scratch memory store, never the operator's (rule 13)
 	}
 	for k, v := range s.env {
 		env[k] = v
@@ -201,13 +202,14 @@ func (s *sandbox) execRun(ctx context.Context, kind, command string) (*runOutcom
 	return out, nil
 }
 
-// mergeEnv is the inherited environment without anything that steers telemetry, then set.
+// mergeEnv is the inherited environment without anything that steers telemetry or ynm's store,
+// then set.
 func mergeEnv(set map[string]string) []string {
 	var env []string
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
 		if k == "PATH" || k == "XDG_STATE_HOME" || k == "TRACEPARENT" || k == "TRACESTATE" ||
-			strings.HasPrefix(k, "OTEL_") || strings.HasPrefix(k, "YNR_") {
+			strings.HasPrefix(k, "OTEL_") || strings.HasPrefix(k, "YNR_") || strings.HasPrefix(k, "YNM_") {
 			continue
 		}
 		env = append(env, kv)

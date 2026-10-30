@@ -75,5 +75,20 @@ data only until it is committed; ynf's run captures, under ynf's retention; a la
 outside the store; or any upstream OTLP backend you forward to with `--upstream`, which is yours to
 clear.
 
+## Check it worked
+
+`recent`, `item` and `trace` show each record's `actor`. Ask for the window that held the person's
+runs, with the same `--erase` file or against the running server:
+
+```bash
+ynr query recent --since 7d
+```
+
+Their runs show `(erased)` in the `actor` column, and so do their spans and events in `item` and
+`trace`. This holds at once, and again after compaction has rewritten the hours without the handle,
+which you can see in the store: the hour's superseded parts and batches are gone. A handle that
+appears only in a field other than `user.name` is not masked, so a name you can still see there
+needs another look.
+
 Keep the file in place for as long as the records may still exist: the list is what masks the handle
 for a reader, including a hot tier that is rebuilt from the store.

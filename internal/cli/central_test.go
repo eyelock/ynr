@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -49,5 +51,24 @@ func TestCentralSocketStaysShort(t *testing.T) {
 	}
 	if got := centralSocket("/" + strings.Repeat("x", 120)); len(got) > maxSocket {
 		t.Fatalf("long state: %s", got)
+	}
+}
+
+// A relative state folder, or the same one reached from another working directory, is the same
+// socket for central and for ynr query.
+func TestCentralSocketIsTheSameFromAnyDirectory(t *testing.T) {
+	long := "/" + strings.Repeat("x", 120)
+	t.Setenv("YNR_CENTRAL_STATE", long)
+	t.Setenv("YNR_SPOOL_ROOT", "")
+	got := querySockets("", "")
+	if len(got) != 1 || got[0] != centralSocket(long) || len(got[0]) > maxSocket {
+		t.Fatalf("querySockets = %v, want central's own fallback %s", got, centralSocket(long))
+	}
+	wd, _ := os.Getwd()
+	if centralSocket("state") != centralSocket(filepath.Join(wd, "state")) {
+		t.Fatal("a relative state folder is not made absolute")
+	}
+	if got := querySockets("", "/run/c.sock"); len(got) != 1 || got[0] != "/run/c.sock" {
+		t.Fatalf("an explicit --socket is the only one asked: %v", got)
 	}
 }

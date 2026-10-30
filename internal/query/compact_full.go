@@ -201,7 +201,7 @@ func compactHour(ctx context.Context, r store.Reader, sig signal, hour time.Time
 		return err
 	}
 	// The part keeps each record once, ordered by time, and names itself as every record's file.
-	copySQL := fmt.Sprintf("COPY (SELECT * REPLACE (%s AS file) FROM %s ORDER BY time, record_id) TO %s (FORMAT parquet, COMPRESSION zstd)",
+	copySQL := fmt.Sprintf("COPY (SELECT * REPLACE (%s AS file) FROM %s ORDER BY time, record_id) TO %s (FORMAT parquet, COMPRESSION zstd, "+schemaKV+")",
 		literal(partKey), sig.table, literal(out))
 	if _, err := db.ExecContext(ctx, copySQL); err != nil {
 		return err

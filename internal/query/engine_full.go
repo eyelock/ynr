@@ -76,6 +76,8 @@ var promoted = []struct {
 	{"model", []string{"gen_ai.response.model", "gen_ai.request.model"}},
 	{"provenance", []string{"ynr.provenance"}},
 	{"collector_id", []string{"ynr.collector.id"}},
+	{"collector_instance", []string{"ynr.collector.instance"}},
+	{"received_at", []string{"ynr.received_at"}},
 }
 
 func promotedSQL() string {
@@ -85,7 +87,11 @@ func promotedSQL() string {
 		for _, k := range p.keys {
 			picks = append(picks, "pick(resource, attributes, "+literal(k)+")")
 		}
-		cols = append(cols, "coalesce("+strings.Join(picks, ", ")+") AS "+p.column)
+		expr := "coalesce(" + strings.Join(picks, ", ") + ")"
+		if p.column == "received_at" {
+			expr = "TRY_CAST(" + expr + " AS TIMESTAMP)" // a time like time, not text
+		}
+		cols = append(cols, expr+" AS "+p.column)
 	}
 	return strings.Join(cols, ",\n       ")
 }

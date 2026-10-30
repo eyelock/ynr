@@ -30,6 +30,16 @@ func TestMain(m *testing.M) {
 			os.Exit(1)
 		}
 	}
+	// A stand-in for ynm: `export` prints the store's log, `remember` appends a record to it.
+	// Like ynm, it keeps its store in $YNM_HOME.
+	fakeYnm := "#!/bin/sh\n: \"${YNM_HOME:?}\"\nmkdir -p \"$YNM_HOME\"\nlog=\"$YNM_HOME/log.jsonl\"\ntouch \"$log\"\n" +
+		"case \"$1\" in\nexport) cat \"$log\" ;;\n" +
+		"remember) n=$(wc -l < \"$log\" | tr -d ' '); printf '{\"v\":1,\"id\":\"R%s\",\"memoryId\":\"M%s\",\"op\":\"create\",\"type\":\"semantic\",\"level\":\"personal\",\"namespace\":\"user/x\",\"content\":\"%s\"}\\n' \"$n\" \"$n\" \"$3\" >> \"$log\" ;;\n" +
+		"*) exit 2 ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "ynm"), []byte(fakeYnm), 0o700); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	_ = os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	code := m.Run()
 	_ = os.RemoveAll(dir)
@@ -93,12 +103,12 @@ func TestConforming(t *testing.T) {
 	if !rep.OK {
 		t.Fatalf("a conforming tool failed:\n%s", dump(rep))
 	}
-	for _, n := range []int{1, 2, 3, 4, 5, 7, 8, 10, 11, 12, 14} {
+	for _, n := range []int{1, 2, 3, 4, 5, 7, 8, 10, 11, 12, 13, 14} {
 		if got := rule(rep, n); got.Status != Pass {
 			t.Errorf("rule %d: %s %s, want pass\n%s", n, got.Status, got.Detail, dump(rep))
 		}
 	}
-	for _, n := range []int{6, 9, 13} {
+	for _, n := range []int{6, 9} {
 		if got := rule(rep, n); got.Status != Skipped {
 			t.Errorf("rule %d: %s, want skipped", n, got.Status)
 		}
@@ -133,6 +143,8 @@ func TestViolations(t *testing.T) {
 		{"no status", "nostatus", 11, "status is unset"},
 		{"blocks on a hung endpoint", "hang", 12, "blocks on telemetry"},
 		{"telemetry changes the exit code", "badexit", 12, "exit code"},
+		{"writes telemetry into ynm", "memory", 13, "added: personal semantic record"},
+		{"writes a canary into ynm", "memorycanary", 13, "prompt canary in"},
 		{"starts ynr because it found it", "ynrstart", 14, "ynr serve"},
 	}
 	for _, tc := range cases {
@@ -306,5 +318,19 @@ func TestRunsInTheInvokedFolder(t *testing.T) {
 	}
 	if !rep.OK {
 		t.Fatalf("the scenario did not run in the invoked folder:\n%s", dump(rep))
+	}
+}
+
+// TestMemoryIsolated shows the runs get a scratch YNM_HOME and not the operator's: a ynm store
+// named by the inherited environment is neither read nor written.
+func TestMemoryIsolated(t *testing.T) {
+	real := t.TempDir()
+	t.Setenv("YNM_HOME", real)
+	rep := runFake(t, "memory")
+	if got := rule(rep, 13); got.Status != Fail {
+		t.Fatalf("rule 13: %s, want fail\n%s", got.Status, dump(rep))
+	}
+	if ents, _ := os.ReadDir(real); len(ents) != 0 {
+		t.Errorf("the operator's YNM_HOME was touched: %v", ents)
 	}
 }

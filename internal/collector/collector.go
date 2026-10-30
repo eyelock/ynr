@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"go.opentelemetry.io/collector/component"
@@ -19,6 +20,8 @@ import (
 	"go.opentelemetry.io/collector/otelcol"
 	"go.opentelemetry.io/collector/receiver"
 	"go.opentelemetry.io/collector/service/telemetry/otelconftelemetry"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/eyelock/ynr"
 	"github.com/eyelock/ynr/internal/collector/spoolreceiver"
@@ -44,7 +47,7 @@ type Settings struct {
 	RegistryTools []string
 	// Upstream is an OTLP/HTTP endpoint, such as http://localhost:4318.
 	Upstream string
-	// Debug also prints a summary of everything shipped to stderr.
+	// Debug also prints a summary of everything shipped to stderr, and the Collector's info logs.
 	Debug bool
 }
 
@@ -98,6 +101,12 @@ func Config(s Settings) (string, error) {
 		exporters = append(exporters, "nop")
 		exp["nop"] = map[string]any{}
 	}
+	// The Collector's own log is quiet unless asked: warnings and errors, and with Debug the
+	// startup and shutdown chatter too.
+	logLevel := "warn"
+	if s.Debug {
+		logLevel = "info"
+	}
 	pipe := map[string]any{"receivers": []string{spoolreceiver.Type.String()}, "exporters": exporters}
 	cfg := map[string]any{
 		"receivers": map[string]any{
@@ -116,7 +125,10 @@ func Config(s Settings) (string, error) {
 		},
 		"exporters": exp,
 		"service": map[string]any{
-			"telemetry": map[string]any{"metrics": map[string]any{"level": "none"}},
+			"telemetry": map[string]any{
+				"metrics": map[string]any{"level": "none"},
+				"logs":    map[string]any{"level": logLevel},
+			},
 			"pipelines": map[string]any{"traces": pipe, "logs": pipe, "metrics": pipe},
 		},
 	}
@@ -135,6 +147,7 @@ func Run(ctx context.Context, s Settings) error {
 		BuildInfo: component.BuildInfo{Command: "ynr", Description: "ynr serve", Version: ynr.Version},
 		// ynr handles signals itself, through ctx.
 		DisableGracefulShutdown: true,
+		LoggingOptions:          []zap.Option{zap.WrapCore(ynrLog)},
 		ConfigProviderSettings: otelcol.ConfigProviderSettings{
 			ResolverSettings: confmap.ResolverSettings{
 				URIs:              []string{"yaml:" + cfg},
@@ -148,6 +161,42 @@ func Run(ctx context.Context, s Settings) error {
 	stop := context.AfterFunc(ctx, col.Shutdown)
 	defer stop()
 	return col.Run(ctx)
+}
+
+// ynrLog writes the Collector's own log in ynr's form: "ynr: collector warn: message", with no
+// timestamp, caller or resource, at the level the Collector was configured for.
+func ynrLog(orig zapcore.Core) zapcore.Core {
+	enc := zapcore.NewConsoleEncoder(zapcore.EncoderConfig{
+		LevelKey:         "level",
+		MessageKey:       "msg",
+		ConsoleSeparator: " ",
+		LineEnding:       zapcore.DefaultLineEnding,
+		EncodeLevel: func(l zapcore.Level, e zapcore.PrimitiveArrayEncoder) {
+			e.AppendString("ynr: collector " + l.String() + ":")
+		},
+	})
+	return noResource{zapcore.NewCore(enc, zapcore.Lock(os.Stderr), orig)}
+}
+
+// noResource drops the "resource" field the Collector attaches to every record, which names the
+// process ynr already is.
+type noResource struct{ zapcore.Core }
+
+func (c noResource) With(fields []zapcore.Field) zapcore.Core {
+	kept := fields[:0:0]
+	for _, f := range fields {
+		if f.Key != "resource" {
+			kept = append(kept, f)
+		}
+	}
+	return noResource{c.Core.With(kept)}
+}
+
+func (c noResource) Check(e zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+	if c.Enabled(e.Level) {
+		return ce.AddCore(e, c)
+	}
+	return ce
 }
 
 func shipAge(s Settings) time.Duration {

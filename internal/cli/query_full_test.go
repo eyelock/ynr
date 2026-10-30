@@ -178,3 +178,57 @@ func TestQueryAsksCentral(t *testing.T) {
 		t.Errorf("asking a stopped central = %d %q", code, errs)
 	}
 }
+
+// TestQueryFindsCentralWithADeepStateFolder: a state folder too deep for a socket puts central's
+// socket under the temporary directory, and ynr query, told only the same state folder, derives
+// that same path with no --socket.
+func TestQueryFindsCentralWithADeepStateFolder(t *testing.T) {
+	dir, err := os.MkdirTemp("", "ynr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	t.Setenv("TMPDIR", dir)
+	state := filepath.Join(dir, strings.Repeat("deep-state-folder-", 8), "central")
+	if len(filepath.Join(state, "central.sock")) <= maxSocket {
+		t.Fatal("the state folder is not deep enough to test")
+	}
+	shared := t.TempDir()
+	s, err := store.Open(store.FolderURL(shared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	_, _ = zw.Write([]byte(strings.ReplaceAll(runLine, `"1791235800000000000"`, `"`+strconv.FormatInt(at.Add(-time.Minute).UnixNano(), 10)+`"`) + "\n"))
+	_ = zw.Close()
+	if err := s.Put(context.Background(), store.BatchKey(store.Traces, at, "pool-a", store.NewULID(at), "local.a", 0, 1), buf.Bytes()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan int, 1)
+	go func() {
+		var out, errb bytes.Buffer
+		done <- Run(ctx, []string{"central", "--store", store.FolderURL(shared), "--state", state, "--poll", "50ms"}, &out, &errb)
+	}()
+	t.Setenv("YNR_STORE", "")
+	t.Setenv("YNR_SPOOL_ROOT", "")
+	t.Setenv("YNR_CENTRAL_STATE", state)
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		code, out, errs := run("query", "cost")
+		if code == ExitOK && strings.Contains(out, "claude-opus-5-5") {
+			break
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("query = %d %q %q", code, out, errs)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	cancel()
+	if code := <-done; code != ExitOK {
+		t.Fatalf("central = %d", code)
+	}
+}

@@ -64,7 +64,7 @@ func buildIndex(ctx context.Context, r store.Reader, day time.Time) error {
   UNION ALL BY NAME
   SELECT NULL::VARCHAR AS item_key, hour, signal, manifest FROM (VALUES %s) AS c(hour, signal, manifest)
   ORDER BY item_key NULLS FIRST, hour
-) TO %s (FORMAT parquet, COMPRESSION zstd)`, strings.Join(data, "\nUNION ALL "), strings.Join(cover, ", "), literal(out))
+) TO %s (FORMAT parquet, COMPRESSION zstd, %s)`, strings.Join(data, "\nUNION ALL "), strings.Join(cover, ", "), literal(out), schemaKV)
 	if _, err := db.ExecContext(ctx, stmt); err != nil {
 		return fmt.Errorf("item index for %s: %w", day.Format("2006-01-02"), err)
 	}
@@ -125,7 +125,7 @@ func readIndex(ctx context.Context, r store.Reader, item string, hours []time.Ti
 			return nil, nil, err
 		}
 		if slices.Contains(keys, key) {
-			p, err := r.Local(ctx, key)
+			p, err := localFile(ctx, r, key)
 			if err != nil {
 				return nil, nil, err
 			}
