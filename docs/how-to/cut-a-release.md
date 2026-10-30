@@ -35,7 +35,8 @@ where the tag is cut. `main` takes pull requests only from `develop`, `release/*
    - **check:** runs `make check` again on the tag;
    - **release:** on a macOS runner, GoReleaser builds the slim `ynr`, the full `ynr-full` (DuckDB, cgo;
      clang for darwin and GCC cross toolchains for linux) and `ynr-stub-vendor` for macOS and Linux on
-     `amd64` and `arm64`, writes `checksums.txt`, signs it with cosign (keyless, so the signature is
+     `amd64` and `arm64` (a post-build hook, `.github/scripts/check-linux-static.sh`, fails the release if a
+     linux full binary needs a dynamic libstdc++), writes `checksums.txt`, signs it with cosign (keyless, so the signature is
      bound to the workflow), attaches SBOMs, publishes the GitHub release, and pushes
      `Formula/ynr.rb` to `eyelock/homebrew-tap` with `RELEASE_TOKEN`.
 

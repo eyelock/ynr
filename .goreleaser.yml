@@ -31,13 +31,22 @@ builds:
   # builds both darwin arches natively, and the linux arches use the cross toolchains the release
   # workflow puts on the PATH (x86_64-unknown-linux-gnu-g++ and aarch64-unknown-linux-gnu-g++).
   # zig cc cannot do it: the static libraries need libstdc++, which zig does not ship.
+  #
+  # The linux binaries link libstdc++ and libgcc statically. The toolchains are GCC 15, whose
+  # libstdc++ is newer than the one on Ubuntu 22.04 or Debian 12, so a dynamic link fails there
+  # with "version `GLIBCXX_3.4.32' not found" (v0.3.1). Static, the only thing the binary asks of
+  # the host is glibc. DuckDB's cgo flags name -lstdc++ explicitly, which -static-libstdc++ does
+  # not touch, so the pre hook puts the toolchain's libstdc++.a alone in a directory that the
+  # -L in extldflags searches first. The post hook checks, per binary, that no libstdc++ is
+  # needed, before anything is published. The darwin builds use the system libc++ and are left
+  # alone.
   - id: ynr-full
     main: ./cmd/ynr
     binary: ynr
     flags: [-trimpath]
     tags: [full]
     ldflags:
-      - -s -w -X github.com/eyelock/ynr.Version={{.Version}}
+      - -s -w -X github.com/eyelock/ynr.Version={{.Version}}{{ if eq .Os "linux" }} -extldflags "-L{{ abs "dist" }}/static-libstdcxx/{{ .Arch }} -static-libgcc"{{ end }}
     env:
       - CGO_ENABLED=1
       - GOWORK=off
@@ -45,6 +54,11 @@ builds:
         CC={{ if eq .Os "linux" }}{{ if eq .Arch "amd64" }}x86_64{{ else }}aarch64{{ end }}-unknown-linux-gnu-gcc{{ else if eq .Arch "amd64" }}clang -arch x86_64{{ else }}clang -arch arm64{{ end }}
       - >-
         CXX={{ if eq .Os "linux" }}{{ if eq .Arch "amd64" }}x86_64{{ else }}aarch64{{ end }}-unknown-linux-gnu-g++{{ else if eq .Arch "amd64" }}clang++ -arch x86_64{{ else }}clang++ -arch arm64{{ end }}
+    hooks:
+      pre:
+        - .github/scripts/static-libstdcxx.sh {{ .Os }} {{ .Arch }} {{ abs "dist" }}/static-libstdcxx/{{ .Arch }}
+      post:
+        - .github/scripts/check-linux-static.sh {{ .Os }} {{ .Arch }} {{ .Path }}
     goos: [darwin, linux]
     goarch: [amd64, arm64]
 
