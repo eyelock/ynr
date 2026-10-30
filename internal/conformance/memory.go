@@ -39,7 +39,7 @@ func (s *sandbox) snapshotMemory(ctx context.Context, path string) (*memorySnaps
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("`ynm export` failed: %v: %s", err, excerpt(stderr.String()))
+		return nil, fmt.Errorf("`ynm export` failed: %w: %s", err, excerpt(stderr.String()))
 	}
 	snap := &memorySnapshot{}
 	for _, l := range strings.Split(string(out), "\n") {
