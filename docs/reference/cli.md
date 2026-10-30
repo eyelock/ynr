@@ -79,7 +79,7 @@ Runs in the foreground until Ctrl-C or `SIGTERM`.
 | `--spool` | the spool root | The spool root. `YNR_SPOOL_ROOT`. |
 | `--store` | the laptop folder store | The object store to ship batches to, such as `file:///path` or `s3://bucket?region=...`. An empty value ships only to the upstream. `YNR_STORE`. |
 | `--upstream` | none | An OTLP/HTTP endpoint to also forward to, such as `http://localhost:4318`. With a store, the upstream is a best-effort copy; without one, it commits the spool. `YNR_UPSTREAM`. |
-| `--collector-id` | `local-<host>` | This collector's identity: a runner pool or a host. Matches `^[a-z0-9][a-z0-9._-]{0,62}$`. `YNR_COLLECTOR_ID`. |
+| `--collector-id` | `local-<host>` | This collector's identity: a runner pool or a host. Matches `^[a-z0-9][a-z0-9._-]{0,62}$`. A hostname too long for that is shortened and ends in a hash of the whole name. `YNR_COLLECTOR_ID`. |
 | `--collector-instance` | none | The job within the pool, recorded as data. `YNR_COLLECTOR_INSTANCE`. |
 | `--poll` | `1s` | How often to read the spool. |
 | `--max-line` | `4194304` | The longest line accepted, in bytes. Longer lines are skipped and counted. |
