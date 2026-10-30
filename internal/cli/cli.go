@@ -4,6 +4,8 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -244,9 +246,20 @@ func defaultCollectorID() string {
 	if err != nil {
 		return "local"
 	}
-	h = strings.ToLower(strings.SplitN(h, ".", 2)[0])
+	return collectorIDFor(h)
+}
+
+// collectorIDFor turns a hostname into a collector id. One too long for idPattern keeps its start
+// and ends in a hash of the whole name, so two long hostnames that share a start stay apart.
+func collectorIDFor(host string) string {
+	h := strings.ToLower(strings.SplitN(host, ".", 2)[0])
 	h = regexp.MustCompile(`[^a-z0-9-]+`).ReplaceAllString(h, "-")
-	return strings.Trim("local-"+h, "-")
+	id := strings.Trim("local-"+h, "-")
+	if len(id) <= 63 {
+		return id
+	}
+	sum := sha256.Sum256([]byte(host))
+	return strings.TrimRight(id[:54], "-") + "-" + hex.EncodeToString(sum[:4])
 }
 
 func serve(ctx context.Context, args []string, stderr io.Writer) int {
@@ -278,7 +291,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		_, _ = fmt.Fprintln(stderr, "ynr: no spool root: set --spool or YNR_SPOOL_ROOT")
 		return ExitConfig
 	case !idPattern.MatchString(*id):
-		_, _ = fmt.Fprintf(stderr, "ynr: --collector-id %q must be lower-case letters, digits, '.', '_' or '-'\n", *id)
+		_, _ = fmt.Fprintf(stderr, "ynr: --collector-id %q must be 1 to 63 lower-case letters, digits, '.', '_' or '-', starting with a letter or digit\n", *id)
 		return ExitConfig
 	case *upstream == "" && *storeURL == "":
 		_, _ = fmt.Fprintln(stderr, "ynr: nowhere to ship: set --store, --upstream, or both")

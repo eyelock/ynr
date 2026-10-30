@@ -10,7 +10,7 @@ given. Two secrets are read from the environment only.
 | `YNR_SPOOL_ROOT` | `info`, `doctor`, `serve`, `tail`, `query` | The spool root. Default `$XDG_STATE_HOME/ynr/spool`. |
 | `YNR_STORE` | `doctor`, `serve`, `central`, `query` | The store URL. An empty value means no store. Default `file://$XDG_DATA_HOME/ynr/store`. |
 | `YNR_UPSTREAM` | `serve` | An OTLP/HTTP endpoint to also forward to. |
-| `YNR_COLLECTOR_ID` | `serve` | This collector's identity. Default `local-<host>`. |
+| `YNR_COLLECTOR_ID` | `serve` | This collector's identity. Default `local-<host>`, shortened with a hash when the hostname is too long. |
 | `YNR_COLLECTOR_INSTANCE` | `serve` | The job within the pool. |
 | `YNR_UI` | `serve`, `central` | The dashboard's address. Loopback for `serve`. |
 | `YNR_ERASE` | `serve`, `central`, `query` | A file of handles to erase. |
