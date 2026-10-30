@@ -39,14 +39,23 @@ func rollDay(ctx context.Context, r store.Reader, day time.Time) error {
 	}
 	d := "DATE " + literal(day.Format("2006-01-02"))
 	return writeRollups(ctx, r, day, store.Daily,
-		macroSQL()+batchSQL(files.Batches)+combinedSQL(files.Parts),
-		fmt.Sprintf(`SELECT %s AS day, lane, model, outcome, harness, repo, count(*) AS runs,
+		macroSQL()+batchSQL(files.Batches)+combinedSQL(files.Parts), dayRunsSQL(d), dayMetricsSQL(d))
+}
+
+// dayRunsSQL and dayMetricsSQL are a day's rollup rows, from spans and metric_points holding the
+// records received that day. Rolling a day up and answering a day with no rollup yet from its
+// records both use them, so the two cannot differ.
+func dayRunsSQL(day string) string {
+	return fmt.Sprintf(`SELECT %s AS day, lane, model, outcome, harness, repo, count(*) AS runs,
   sum(cost_usd) AS cost_usd,
   sum(TRY_CAST(attr(attributes, 'gen_ai.usage.input_tokens') AS BIGINT)) AS input_tokens,
   sum(TRY_CAST(attr(attributes, 'gen_ai.usage.output_tokens') AS BIGINT)) AS output_tokens,
   sum(duration_ms) AS duration_ms
-FROM spans WHERE name = 'ynh.run' GROUP BY ALL`, d),
-		fmt.Sprintf(`WITH series AS (
+FROM spans WHERE name = 'ynh.run' GROUP BY ALL`, day)
+}
+
+func dayMetricsSQL(day string) string {
+	return fmt.Sprintf(`WITH series AS (
   SELECT name, unit, type, temporality, service, attributes, resource, start_time,
          arg_max(value, time) AS last, sum(value) AS sum, min(value) AS min, max(value) AS max,
          sum(count) AS count, count(*) AS points
@@ -55,7 +64,7 @@ FROM spans WHERE name = 'ynh.run' GROUP BY ALL`, d),
 SELECT %s AS day, name, unit, type, temporality, service, attributes,
   sum(CASE WHEN type = 'gauge' THEN NULL WHEN temporality = 'cumulative' THEN last ELSE sum END) AS total,
   sum(count) AS count, min(min) AS min, max(max) AS max, sum(points) AS points
-FROM series GROUP BY ALL`, d))
+FROM series GROUP BY ALL`, day)
 }
 
 // rollMonth writes a month's rollups from its days': run totals summed, and each metric's total
@@ -134,9 +143,10 @@ func exists(ctx context.Context, r store.Reader, key string) (bool, error) {
 }
 
 // rollupFiles are the rollups covering a window, in whole days: a month's rollup where the
-// window holds the whole month, and the days' rollups otherwise.
-func rollupFiles(ctx context.Context, r store.Reader, kind string, since, until time.Time) ([]string, error) {
-	var out []string
+// window holds the whole month, and the days' rollups otherwise. covered are the days they
+// cover.
+func rollupFiles(ctx context.Context, r store.Reader, kind string, since, until time.Time) (out []string, covered map[time.Time]bool, err error) {
+	covered = map[time.Time]bool{}
 	from, to := since.UTC().Truncate(24*time.Hour), until.UTC()
 	for d := from; d.Before(to); {
 		month := time.Date(d.Year(), d.Month(), 1, 0, 0, 0, 0, time.UTC)
@@ -145,14 +155,17 @@ func rollupFiles(ctx context.Context, r store.Reader, kind string, since, until 
 			key := store.RollupKey(kind, store.Monthly, month)
 			ok, err := exists(ctx, r, key)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if ok {
 				p, err := r.Local(ctx, key)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				out = append(out, p)
+				for m := month; m.Before(next); m = m.AddDate(0, 0, 1) {
+					covered[m] = true
+				}
 				d = next
 				continue
 			}
@@ -160,27 +173,43 @@ func rollupFiles(ctx context.Context, r store.Reader, kind string, since, until 
 		key := store.RollupKey(kind, store.Daily, d)
 		ok, err := exists(ctx, r, key)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if ok {
 			p, err := r.Local(ctx, key)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			out = append(out, p)
+			covered[d] = true
 		}
 		d = d.AddDate(0, 0, 1)
 	}
-	return out, nil
+	return out, covered, nil
 }
 
-// runRollups answers a long-range query from the rollups alone.
+// hasRecords reports whether anything was received on a day for a signal, batches or compacted
+// parts, with two listings rather than one for each of its hours.
+func hasRecords(ctx context.Context, r store.Reader, signal string, day time.Time) (bool, error) {
+	for _, p := range []string{HourPrefix(signal, day), store.CompactedPrefix(signal, day)} {
+		keys, err := r.List(ctx, p[:strings.LastIndex(strings.TrimSuffix(p, "/"), "/")+1])
+		if err != nil || len(keys) > 0 {
+			return len(keys) > 0, err
+		}
+	}
+	return false, nil
+}
+
+// runRollups answers a long-range query from the rollups for the days that have them, and from
+// the records received on the days that do not yet: rollups are written after a day closes, so
+// the open day, and a closed day whose rollup is not written yet, have none. Each day is counted
+// once, by the day its records were received, as a rollup counts it, whole days either way.
 func runRollups(ctx context.Context, r store.Reader, q *Query, p Params) (*Result, error) {
-	runs, err := rollupFiles(ctx, r, store.RollupRuns, p.Since, p.Until)
+	runs, runDays, err := rollupFiles(ctx, r, store.RollupRuns, p.Since, p.Until)
 	if err != nil {
 		return nil, err
 	}
-	metrics, err := rollupFiles(ctx, r, store.RollupMetrics, p.Since, p.Until)
+	metrics, metricDays, err := rollupFiles(ctx, r, store.RollupMetrics, p.Since, p.Until)
 	if err != nil {
 		return nil, err
 	}
@@ -190,16 +219,66 @@ func runRollups(ctx context.Context, r store.Reader, q *Query, p Params) (*Resul
 	}
 	defer func() { _ = db.Close() }()
 	db.SetMaxOpenConns(1)
-	setup := fmt.Sprintf("CREATE VIEW run_rollups AS %s;\nCREATE VIEW metric_rollups AS %s;",
-		rollupSource(runs, runRollupCols), rollupSource(metrics, metricRollupCols))
+	setup := macroSQL() + fmt.Sprintf(`
+CREATE TABLE open_runs AS SELECT %s WHERE false;
+CREATE TABLE open_metrics AS SELECT %s WHERE false;`, runRollupCols, metricRollupCols)
 	if _, err := db.ExecContext(ctx, setup); err != nil {
+		return nil, err
+	}
+	res := &Result{}
+	for d := p.Since.UTC().Truncate(24 * time.Hour); d.Before(p.Until.UTC()); d = d.AddDate(0, 0, 1) {
+		var sigs []string
+		insert := map[string]string{}
+		if slices.Contains(q.Signals, store.Traces) && !runDays[d] {
+			sigs, insert[store.Traces] = append(sigs, store.Traces), "INSERT INTO open_runs BY NAME "+dayRunsSQL("DATE "+literal(d.Format("2006-01-02")))
+		}
+		if slices.Contains(q.Signals, store.Metrics) && !metricDays[d] {
+			sigs, insert[store.Metrics] = append(sigs, store.Metrics), "INSERT INTO open_metrics BY NAME "+dayMetricsSQL("DATE "+literal(d.Format("2006-01-02")))
+		}
+		var have []string
+		for _, sig := range sigs {
+			ok, err := hasRecords(ctx, r, sig, d)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				have = append(have, sig)
+			}
+		}
+		if len(have) == 0 {
+			continue
+		}
+		var hours []time.Time
+		for i := 0; i < 24; i++ {
+			hours = append(hours, d.Add(time.Duration(i)*time.Hour))
+		}
+		files, err := ReadHours(ctx, r, have, hours)
+		if err != nil {
+			return nil, err
+		}
+		// The views are redefined for each day, so each is counted on its own.
+		if _, err := db.ExecContext(ctx, batchSQL(files.Batches)+combinedSQL(files.Parts)); err != nil {
+			return nil, fmt.Errorf("query: preparing the views: %w", err)
+		}
+		for _, sig := range have {
+			if _, err := db.ExecContext(ctx, insert[sig]); err != nil {
+				return nil, fmt.Errorf("query: reading %s on %s: %w", sig, d.Format("2006-01-02"), err)
+			}
+			res.FromRecords = true
+			res.Files += len(files.Parts[sig]) + len(files.Batches[sig])
+		}
+	}
+	views := fmt.Sprintf("CREATE VIEW run_rollups AS %s UNION ALL BY NAME SELECT * FROM open_runs;\n"+
+		"CREATE VIEW metric_rollups AS %s UNION ALL BY NAME SELECT * FROM open_metrics;",
+		rollupSource(runs, runRollupCols), rollupSource(metrics, metricRollupCols))
+	if _, err := db.ExecContext(ctx, views); err != nil {
 		return nil, err
 	}
 	rq := *q
 	rq.SQL = q.RollupSQL
-	res, err := runOn(ctx, db, &rq, p)
-	if res != nil {
-		res.Files, res.FromRollups = len(runs)+len(metrics), true
+	out, err := runOn(ctx, db, &rq, p)
+	if out != nil {
+		out.Files, out.FromRollups, out.FromRecords = res.Files+len(runs)+len(metrics), true, res.FromRecords
 	}
-	return res, err
+	return out, err
 }
