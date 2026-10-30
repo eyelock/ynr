@@ -107,6 +107,16 @@ the whole report; `--keep` keeps the temporary spools for looking at what was wr
 bounds one run of a scenario (60 seconds by default) and `--flush-limit` is the tool's bound on its
 flush at exit (2 seconds by default).
 
+## What rule 13 checks
+
+When `ynm` is on `PATH`, every run of a scenario gets its own empty `YNM_HOME`, and any other `YNM_*`
+variable is dropped from the environment, so ynm never opens your own store. Before the first run
+and after the last, `ynr conformance` runs `ynm export` from the folder it was invoked in, which
+reads the scratch personal store and the repository's project store, if it has one. Rule 13 fails
+if any record was added, changed or removed in between, or if any holds a planted canary. A
+conformance run has no reason to write memory, so there is no exemption for a scenario that does.
+The report names the records by id, type and level, never by content.
+
 ## What it skips
 
 A check that cannot run says `SKIPPED` and does not fail the job:
@@ -114,5 +124,6 @@ A check that cannot run says `SKIPPED` and does not fail the job:
 - Weaver's live check of names runs only when `weaver` is on `PATH`.
 - Rule 4 is skipped when no process the tool started wrote spans, and HTTP calls between tools are
   not checked.
-- Rule 13, that ynm's store is unchanged, is skipped: the check does not implement it yet.
+- Rule 13, that telemetry never reaches ynm's memory, is skipped when `ynm` is not on `PATH`, or when
+  `ynm export` fails in the scratch store.
 - Rules 6 and 9 need judgement. The report prints span counts and names for review instead.

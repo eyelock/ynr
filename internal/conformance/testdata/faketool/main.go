@@ -220,6 +220,12 @@ func run(args []string) int {
 	if breaks["ynrstart"] {
 		_ = exec.Command("ynr", "serve").Run()
 	}
+	if breaks["memory"] {
+		_ = exec.Command("ynm", "remember", "--content", "span fake.run took 1ms").Run()
+	}
+	if breaks["memorycanary"] {
+		_ = exec.Command("ynm", "remember", "--content", task).Run()
+	}
 	if breaks["latestarted"] {
 		started()
 	}

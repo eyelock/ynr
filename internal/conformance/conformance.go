@@ -97,6 +97,12 @@ func Run(ctx context.Context, o Options) (*Report, error) {
 		can := newCanaries()
 		command := can.substitute(sc.Run)
 		runs := map[string]*runOutcome{}
+		// Rule 13: ynm's records before any run, and again after the last.
+		var mem memoryState
+		if p, err := exec.LookPath("ynm"); err == nil {
+			mem.path = p
+			mem.before, mem.err = sb.snapshotMemory(ctx, p)
+		}
 		sr := ScenarioReport{Name: sc.Name}
 		for _, kind := range []string{runSpool, runEndpoint, runNeither, runUnwritable, runHung, runKill} {
 			if ctx.Err() != nil {
@@ -117,7 +123,10 @@ func Run(ctx context.Context, o Options) (*Report, error) {
 				TimedOut: r.TimedOut, Killed: r.Killed, SpoolRecs: len(r.Spool.Recs), EndpointRecs: len(r.Endpoint.Recs),
 			})
 		}
-		k := &checker{f: f, sc: sc, o: o, reg: reg, regErr: regErr, runs: runs, planted: can.planted(sc.Run)}
+		if mem.path != "" && mem.err == nil {
+			mem.after, mem.err = sb.snapshotMemory(ctx, mem.path)
+		}
+		k := &checker{f: f, sc: sc, o: o, reg: reg, regErr: regErr, runs: runs, planted: can.planted(sc.Run), mem: mem}
 		sr.Checks = k.all()
 		sr.Review = append(reviewLines("spool", runs[runSpool].Spool), reviewLines("operator endpoint", runs[runEndpoint].Endpoint)...)
 		rep.Scenarios = append(rep.Scenarios, sr)
