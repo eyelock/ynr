@@ -59,16 +59,19 @@ stops on Ctrl-C or `SIGTERM`.
 
 ## Ask it
 
-On the same machine, name the socket:
+On the same machine, tell `ynr query` which state folder central uses, or name the socket:
 
 ```bash
+YNR_CENTRAL_STATE=/var/lib/ynr/central ynr query runs
 ynr query runs --socket /var/lib/ynr/central/central.sock
 ```
 
-`YNR_CENTRAL_SOCKET` sets the socket for `ynr query` too. When the state folder's path is too long
-for a Unix socket, central puts the socket under the temporary directory and the startup line says
-where; give it your own with `--socket` to avoid that. Without a socket, `ynr query` reads the
-store named by `--store` or `YNR_STORE` directly.
+Central and `ynr query` derive the socket from the state folder in the same way. When the folder's
+path is too long for a Unix socket, both put it under the temporary directory, under a name made
+from the folder's absolute path, so you need no `--socket`; the startup line says where it is.
+(They must see the same temporary directory, so the same `TMPDIR`.) `YNR_CENTRAL_SOCKET` sets the
+socket for both. With neither, and no central answering, `ynr query` reads the store named by
+`--store` or `YNR_STORE` directly.
 
 ## Try it against MinIO
 

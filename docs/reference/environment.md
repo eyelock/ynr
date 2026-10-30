@@ -15,7 +15,7 @@ given. Two secrets are read from the environment only.
 | `YNR_UI` | `serve`, `central` | The dashboard's address. Loopback for `serve`. |
 | `YNR_ERASE` | `serve`, `central`, `query` | A file of handles to erase. |
 | `YNR_REGISTRY_TOOLS` | `serve` | Comma-separated tools whose registries to learn, by bare name on `PATH`. |
-| `YNR_CENTRAL_STATE` | `central` | The folder for the hot tier's database. |
+| `YNR_CENTRAL_STATE` | `central`, `query` | The folder for the hot tier's database, and so where `query` finds central's default socket. |
 | `YNR_CENTRAL_SOCKET` | `central`, `query` | The Unix socket central answers on, and `query` asks. |
 | `YNR_OIDC_ISSUER` | `central` | The OpenID Connect issuer URL. |
 | `YNR_OIDC_CLIENT_ID` | `central` | The client id. |
