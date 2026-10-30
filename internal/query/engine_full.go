@@ -168,13 +168,14 @@ func maskedParquet(files []string) string {
 		"CASE WHEN erased(actor) THEN '" + Erased + "' ELSE actor END AS actor) FROM " + parquet(files)
 }
 
-// parquet reads compacted parts.
+// parquet reads compacted parts, matching columns by name: a store holds parts of more than one
+// schema version, and a column an older part lacks reads as NULL.
 func parquet(files []string) string {
 	quoted := make([]string, len(files))
 	for i, f := range files {
 		quoted[i] = literal(f)
 	}
-	return "read_parquet([" + strings.Join(quoted, ", ") + "])"
+	return "read_parquet([" + strings.Join(quoted, ", ") + "], union_by_name = true)"
 }
 
 // runOn runs a named query on a database that has spans, logs and metric_points.
