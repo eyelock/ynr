@@ -46,6 +46,10 @@ Usage:
             [--erase <file>] [--ui 127.0.0.1:4319] [--registry-tools ynh,ynf,ynm] [--debug]
   ynr central --store <url> [--hot-window 6h] [--socket <path>] [--state <folder>] [--poll 5s]
             [--compact-lookback 24h] [--compact-every 5m] [--erase <file>]
+            [--retain 168h] [--retain-bytes <bytes>]
+            [--ui <addr> --oidc-issuer <url> --oidc-client-id <id> --oidc-redirect-url <url>
+             --allow-emails <list> | --allow-domain <domain> | --allow-group <group>
+             [--group-claim groups] [--session-ttl 8h]]
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
             [--exit-on-stdin-eof]
@@ -59,9 +63,12 @@ Usage:
 ynr central reads a shared store, such as a bucket the collectors ship to: it keeps the last 6
 hours in a hot tier fed by polling each collector's new files, compacts closed hours under a
 lease in the store so two centrals never compact one hour together, and answers ynr query on a
-Unix socket (--socket on ynr query). It needs the full build, holds nothing that cannot be
-rebuilt from the store, and leaves a bucket's retention to its lifecycle rules. The dashboard
-(--ui) is refused until sign-in is built.
+Unix socket: central.sock in --state, or under the temporary directory when that path is too
+long, where ynr query finds it from YNR_CENTRAL_STATE (or --socket on both). It needs the full
+build, holds nothing that cannot be rebuilt from the store, and leaves a bucket's retention to
+its lifecycle rules. --ui serves the dashboard behind OpenID Connect sign-in and is refused
+unless --oidc-* and an --allow-* rule are set; YNR_OIDC_CLIENT_SECRET and YNR_SESSION_SECRET are
+read from the environment only.
 
 ynr relay prints its OTLP/HTTP endpoint as its first line of output, then runs until it is
 stopped (Ctrl-C, SIGTERM, or with --exit-on-stdin-eof its standard input closing), flushing what
@@ -93,7 +100,10 @@ registry are kept and marked ynr.registry=unknown; names a learned registry does
 counted, never rejected. With none named (the default) ynr learns nothing and checks nothing.
 
 Environment fallbacks: YNR_SPOOL_ROOT, YNR_STORE, YNR_UPSTREAM, YNR_COLLECTOR_ID,
-YNR_COLLECTOR_INSTANCE, YNR_REGISTRY_TOOLS, and YNR_SPOOL for the relay's folder.
+YNR_COLLECTOR_INSTANCE, YNR_REGISTRY_TOOLS, YNR_ERASE and YNR_UI; for central also
+YNR_CENTRAL_STATE, YNR_CENTRAL_SOCKET (which ynr query reads too), YNR_OIDC_ISSUER,
+YNR_OIDC_CLIENT_ID, YNR_OIDC_REDIRECT_URL, YNR_ALLOW_EMAILS, YNR_ALLOW_DOMAIN, YNR_ALLOW_GROUP
+and YNR_GROUP_CLAIM; and YNR_SPOOL for the relay's folder.
 `
 
 // stdin is the relay's standard input, replaced in tests.

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -224,5 +225,25 @@ func TestSplitList(t *testing.T) {
 	got := splitList(" ynh, ynf,,ynm ,ynh")
 	if strings.Join(got, "|") != "ynh|ynf|ynm" || splitList("") != nil {
 		t.Errorf("%q", got)
+	}
+}
+
+// The usage text names every flag the commands really take, so it cannot drift from the code.
+func TestUsageNamesEveryFlag(t *testing.T) {
+	_, usage, _ := run("help")
+	flagLine := regexp.MustCompile(`(?m)^\s+-([a-z][a-z-]*)`)
+	for _, args := range [][]string{
+		{"info"}, {"doctor"}, {"serve"}, {"central"}, {"relay"}, {"conformance"}, {"tail"}, {"query", "runs"},
+	} {
+		_, _, help := run(append(args, "-h")...)
+		found := flagLine.FindAllStringSubmatch(help, -1)
+		if len(found) == 0 {
+			t.Errorf("%v -h listed no flags:\n%s", args, help)
+		}
+		for _, m := range found {
+			if !strings.Contains(usage, "--"+m[1]) {
+				t.Errorf("ynr %s takes --%s, which the usage does not mention", strings.Join(args, " "), m[1])
+			}
+		}
 	}
 }
