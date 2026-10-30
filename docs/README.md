@@ -7,8 +7,7 @@ about it: runs by outcome for each lane, what happened to one ticket, one trace,
 cost.
 
 ```bash
-brew install eyelock/tap/ynr        # the slim build: relay, serve as a shipper, tail, conformance
-make install                        # from a clone: the full build, with DuckDB, the dashboard and ynr query
+brew install eyelock/tap/ynr        # the full build: DuckDB, the dashboard, ynr query, central
 ynr serve --ui 127.0.0.1:4319       # read the spool, ship it, and serve a dashboard on loopback
 ```
 
@@ -31,12 +30,12 @@ One source, two binaries ([ADR-001](adr/001-positioning.md)).
 
 | Build | Has | Install |
 |---|---|---|
-| **slim** | `relay`, `serve` as a shipper to a store, `info`, `doctor`, `tail`, `conformance`, `telemetry`. No cgo, no DuckDB. | `brew install eyelock/tap/ynr`, or a release download |
-| **full** | The slim build's commands plus DuckDB: the hot tier, `query`, the dashboard (`serve --ui`), compaction, and `central`. | `make install` from a clone |
+| **slim** | `relay`, `serve` as a shipper to a store, `info`, `doctor`, `tail`, `conformance`, `telemetry`. No cgo, no DuckDB. | a release download (`ynr_<version>_<os>_<arch>.tar.gz`), which is what ynh's image and CI use |
+| **full** | The slim build's commands plus DuckDB: the hot tier, `query`, the dashboard (`serve --ui`), compaction, and `central`. | `brew install eyelock/tap/ynr`, a release download (`ynr-full_<version>_<os>_<arch>.tar.gz`), or `make install` from a clone |
 
-The releases and the Homebrew formula carry the slim build today. Anything that needs the full build
+Each release carries both builds, and the Homebrew formula installs the full one. Anything that needs the full build
 says so and, in the slim build, refuses with a message rather than doing less.
-[Install ynr](how-to/install.md) has the three routes.
+[Install ynr](how-to/install.md) has the routes.
 
 ## What is here
 

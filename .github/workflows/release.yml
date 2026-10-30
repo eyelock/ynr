@@ -1,6 +1,6 @@
 name: release
-# Releases ynr from a v* tag on main: binaries for darwin and linux, a signed checksum file,
-# SBOMs, and the formula in eyelock/homebrew-tap. spoolexporter/v* tags publish the exporters
+# Releases ynr from a v* tag on main: the slim and full builds for darwin and linux, the stub
+# vendor, a signed checksum file, SBOMs, and the formula (the full build) in eyelock/homebrew-tap. spoolexporter/v* tags publish the exporters
 # instead (publish-spoolexporter.yml).
 on:
   push:
@@ -35,7 +35,9 @@ jobs:
   release:
     name: Release
     needs: check
-    runs-on: ubuntu-latest
+    # macOS, so clang builds both darwin arches of the full build (cgo, DuckDB) natively. The linux
+    # arches use the cross toolchains below, because DuckDB's static libraries need libstdc++.
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v7
         with:
@@ -43,6 +45,28 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # GCC cross toolchains for the linux full builds, pinned by version and checksum. They run on
+      # an arm64 macOS host, which macos-latest is.
+      - name: Install linux cross toolchains
+        env:
+          TOOLCHAINS_TAG: v15.2.0
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dir="$RUNNER_TEMP/toolchains"
+          mkdir -p "$dir"
+          cd "$dir"
+          gh release download "$TOOLCHAINS_TAG" -R messense/homebrew-macos-cross-toolchains \
+            -p 'x86_64-unknown-linux-gnu-aarch64-darwin.tar.gz' -p 'aarch64-unknown-linux-gnu-aarch64-darwin.tar.gz'
+          cat > SHA256SUMS <<'EOF'
+          04746819d162f829dacf2ea6d6947b9fb4141ffbd91588f0bfbaab4c2c7e1a30  x86_64-unknown-linux-gnu-aarch64-darwin.tar.gz
+          0f224db36d8572489f09ed5bce39f189eee998f9ab4f8ea07f510d6c7078caa3  aarch64-unknown-linux-gnu-aarch64-darwin.tar.gz
+          EOF
+          shasum -a 256 -c SHA256SUMS
+          for t in x86_64 aarch64; do
+            tar xzf "$t-unknown-linux-gnu-aarch64-darwin.tar.gz"
+            echo "$dir/$t-unknown-linux-gnu/bin" >> "$GITHUB_PATH"
+          done
       - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
       - uses: anchore/sbom-action/download-syft@v0
       - uses: goreleaser/goreleaser-action@v7

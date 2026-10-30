@@ -33,12 +33,13 @@ where the tag is cut. `main` takes pull requests only from `develop`, `release/*
    The `release` workflow then runs on the tag:
 
    - **check:** runs `make check` again on the tag;
-   - **release:** GoReleaser builds the slim `ynr` and `ynr-stub-vendor` for macOS and Linux on
+   - **release:** on a macOS runner, GoReleaser builds the slim `ynr`, the full `ynr-full` (DuckDB, cgo;
+     clang for darwin and GCC cross toolchains for linux) and `ynr-stub-vendor` for macOS and Linux on
      `amd64` and `arm64`, writes `checksums.txt`, signs it with cosign (keyless, so the signature is
      bound to the workflow), attaches SBOMs, publishes the GitHub release, and pushes
      `Formula/ynr.rb` to `eyelock/homebrew-tap` with `RELEASE_TOKEN`.
 
-4. **Check what it published.** The release has two archives for each of the four platforms, their
+4. **Check what it published.** The release has three archives for each of the four platforms (`ynr_`, `ynr-full_` and `ynr-stub-vendor_`), their
    SBOMs, `checksums.txt` and `checksums.txt.sigstore.json`. Verify the signature:
 
    ```bash
@@ -47,7 +48,7 @@ where the tag is cut. `main` takes pull requests only from `develop`, `release/*
      --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
    ```
 
-   Check the formula in `eyelock/homebrew-tap`, and `brew install eyelock/tap/ynr && ynr version`.
+   Check the formula in `eyelock/homebrew-tap`, and `brew install eyelock/tap/ynr && ynr version`, which should end in `(full)`.
    GoReleaser writes a commit list as the release's description; replace it with the release notes:
 
    ```bash

@@ -35,9 +35,12 @@ and `ynr conformance`, which a tool's CI runs, is slim so that it needs no toolc
 
 ## Which is distributed
 
-The releases and the Homebrew formula are the slim build (`CGO_ENABLED=0`), because that is what runs
-in images and CI. The full build is installed from a clone with `make install`, because it needs a
-C toolchain. A person who installs from Homebrew and then runs `ynr query` is told, in one line, that
-queries need the full build.
+Each release carries both builds as separate archives. The slim archives, `ynr_<version>_<os>_<arch>`
+(`CGO_ENABLED=0`), are what ynh's image and a tool's CI download, and their names do not change. The
+full archives, `ynr-full_<version>_<os>_<arch>`, hold the build with DuckDB, and the Homebrew formula
+installs that one, so `brew install eyelock/tap/ynr` has `query`, `central` and `--ui`. The release
+workflow builds the full binaries for all four platforms on one macOS runner: clang for the two
+darwin ones and GCC cross toolchains for the two linux ones, because DuckDB's prebuilt static
+libraries need libstdc++. A clone can still make the full build with `make install`.
 
 See [ADR-001](../adr/001-positioning.md).

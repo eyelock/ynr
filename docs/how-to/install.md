@@ -1,10 +1,10 @@
 # Install ynr
 
 Get `ynr` onto a machine and on its `PATH`. There are two builds ([The two builds](../explanation/the-two-builds.md)):
-the slim build has no DuckDB, and the full build has it. Releases and Homebrew carry the slim build;
-the full build comes from a clone.
+the slim build has no DuckDB, and the full build has it. Homebrew installs the full build. Each release
+carries both builds as separate archives, and the full build can also be made from a clone.
 
-## From Homebrew (slim)
+## From Homebrew (full)
 
 ```bash
 brew install eyelock/tap/ynr
@@ -14,24 +14,26 @@ ynr version
 Expected:
 
 ```text
-0.2.2 (slim)
+0.2.2 (full)
 ```
 
-## From a release (slim)
+## From a release (slim or full)
 
-Each release has an archive for `darwin` and `linux` on `amd64` and `arm64`, a `checksums.txt`
+Each release has two archives for each platform: `ynr_<version>_<os>_<arch>.tar.gz` is the slim
+build (what ynh's base image and a tool's CI download) and `ynr-full_<version>_<os>_<arch>.tar.gz`
+is the full build (what Homebrew installs). The slim name is stable. Each is an archive for `darwin` and `linux` on `amd64` and `arm64`; the release also has a `checksums.txt`
 signed with cosign, and SBOMs. Download, check against the checksums, and unpack:
 
 ```bash
 V=0.2.2
-ynr="ynr_${V}_darwin_arm64.tar.gz"
+ynr="ynr-full_${V}_darwin_arm64.tar.gz"      # or ynr_${V}_... for the slim build
 gh release download "v$V" -R eyelock/ynr -p "$ynr" -p checksums.txt
 grep -E " ${ynr}\$" checksums.txt > wanted.txt
 shasum -a 256 -c wanted.txt          # sha256sum --check on Linux
 tar -xzf "$ynr" ynr
 ```
 
-Move `ynr` to a folder on your `PATH`. To verify the signature on the checksum file as well:
+The binary inside either archive is called `ynr`. Move it to a folder on your `PATH`. To verify the signature on the checksum file as well:
 
 ```bash
 cosign verify-blob --bundle checksums.txt.sigstore.json \
