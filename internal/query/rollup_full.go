@@ -134,7 +134,7 @@ func rollupSource(files []string, cols string) string {
 	if len(files) == 0 {
 		return "SELECT " + cols + " WHERE false"
 	}
-	return "SELECT * FROM " + strings.TrimSuffix(parquet(files), ")") + ", union_by_name = true)"
+	return "SELECT * FROM " + parquet(files)
 }
 
 func exists(ctx context.Context, r store.Reader, key string) (bool, error) {

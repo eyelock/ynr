@@ -27,8 +27,8 @@ func writeParquet(t *testing.T, kv string) string {
 	return out
 }
 
-// TestSchemaVersionIsChecked: no version reads as version 1, a newer or unreadable one fails
-// loudly (ADR-005).
+// TestSchemaVersionIsChecked: no version and version 1 read the same, a newer or unreadable one
+// fails loudly (ADR-005).
 func TestSchemaVersionIsChecked(t *testing.T) {
 	ctx := context.Background()
 	if err := checkSchema(ctx, writeParquet(t, "")); err != nil {
@@ -37,7 +37,10 @@ func TestSchemaVersionIsChecked(t *testing.T) {
 	if err := checkSchema(ctx, writeParquet(t, ", "+schemaKV)); err != nil {
 		t.Errorf("the current version: %v", err)
 	}
-	for _, v := range []string{"2", "99", "x", "0"} {
+	if err := checkSchema(ctx, writeParquet(t, ", KV_METADATA {'"+SchemaKey+"': '1'}")); err != nil {
+		t.Errorf("version 1: %v", err)
+	}
+	for _, v := range []string{"3", "99", "x", "0"} {
 		err := checkSchema(ctx, writeParquet(t, ", KV_METADATA {'"+SchemaKey+"': '"+v+"'}"))
 		if err == nil {
 			t.Errorf("version %q was accepted", v)
@@ -71,7 +74,7 @@ func TestCompactedPartsAreVersioned(t *testing.T) {
 		var v string
 		err = db.QueryRow("SELECT decode(value) FROM parquet_kv_metadata(" + literal(p) + ") WHERE decode(key) = " + literal(SchemaKey)).Scan(&v)
 		_ = db.Close()
-		if err != nil || v != "1" {
+		if err != nil || v != "2" {
 			t.Errorf("%s: version %q, %v", k, v, err)
 		}
 	}
@@ -83,7 +86,7 @@ func TestCompactedPartsAreVersioned(t *testing.T) {
 	p, _ := r.Local(context.Background(), part)
 	db, _ := sql.Open("duckdb", "")
 	newer := filepath.Join(t.TempDir(), "n.parquet")
-	if _, err := db.Exec("COPY (SELECT * FROM read_parquet(" + literal(p) + ")) TO " + literal(newer) + " (FORMAT parquet, KV_METADATA {'" + SchemaKey + "': '2'})"); err != nil {
+	if _, err := db.Exec("COPY (SELECT * FROM read_parquet(" + literal(p) + ")) TO " + literal(newer) + " (FORMAT parquet, KV_METADATA {'" + SchemaKey + "': '3'})"); err != nil {
 		t.Fatal(err)
 	}
 	_ = db.Close()

@@ -16,7 +16,7 @@ var schemaKV = fmt.Sprintf("KV_METADATA {'%s': '%d'}", SchemaKey, SchemaVersion)
 var checked sync.Map // paths already found readable
 
 // checkSchema fails when a Parquet file's schema version is newer than this build reads, or is
-// not a number. A file with no version is version 1 (ADR-005).
+// not a number. A file with no version is version 1, as is one that says 1 (ADR-005).
 func checkSchema(ctx context.Context, path string) error {
 	if _, ok := checked.Load(path); ok {
 		return nil

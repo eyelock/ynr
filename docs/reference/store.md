@@ -76,10 +76,20 @@ that suit them.
 ### Schema version
 
 Every Parquet file ynr writes (a part, the item index, a rollup) has the key `ynr.schema_version` in
-its file metadata, now `1`. A reader treats a file with no such key as version 1, and refuses a file
-whose version is higher than it knows, or is not a positive whole number, with an error naming the
-file, so an older ynr does not misread what a newer one wrote. Adding a column does not change the
-version, because readers match columns by name; changing the meaning or type of one does.
+its file metadata, now `2`.
+
+- Version 1 is the layout v0.2.2 and earlier wrote, which has no `collector_instance` or `received_at`
+  column. Those files have no such key, and a reader treats a file with no key, or with the key `1`,
+  as version 1.
+- Version 2 is the layout with `collector_instance` and `received_at`.
+
+A reader reads files of both versions together, matching columns by name, so a store that has been
+upgraded holds both: a record in a version 1 part reads those two columns as NULL. Compacting an hour
+that has a version 1 part writes a version 2 part, and the item index and rollups are rewritten as
+version 2 when their day is compacted again. A reader refuses a file whose version is higher than it
+knows, or is not a positive whole number, with an error naming the file, so an older ynr does not
+misread what a newer one wrote. Adding a column does not change the version, because readers match
+columns by name; changing the meaning or type of one does.
 
 ### Item index
 
