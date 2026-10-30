@@ -247,3 +247,20 @@ func TestUsageNamesEveryFlag(t *testing.T) {
 		}
 	}
 }
+
+// TestCollectorIDForAnyHost: every hostname gives an id the collector accepts, and two long ones
+// sharing a start stay apart. A CI runner's hostname is often longer than an id may be.
+func TestCollectorIDForAnyHost(t *testing.T) {
+	long := "iad20-fj917-5597187e-256d-4af3-8659-f326c957451c-12685478a4c2"
+	for _, host := range []string{"mac", "Davids-MacBook-Pro.local", long, long + "x", strings.Repeat("a", 300), "--", "UPPER_case.example.com"} {
+		if id := collectorIDFor(host); !idPattern.MatchString(id) {
+			t.Errorf("host %q gives %q, which the collector refuses", host, id)
+		}
+	}
+	if collectorIDFor(long) == collectorIDFor(long+"x") {
+		t.Error("two long hostnames sharing a start give the same id")
+	}
+	if got := collectorIDFor("Davids-MacBook-Pro.local"); got != "local-davids-macbook-pro" {
+		t.Errorf("short hostname = %q, want it unchanged", got)
+	}
+}
