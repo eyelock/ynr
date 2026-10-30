@@ -29,8 +29,9 @@ type Query struct {
 	Signals []string
 	// Indexed queries read only the hours the item index names for the item in Arg.
 	Indexed bool
-	// RollupSQL, where set, answers windows longer than LongRange from the rollups alone, over
-	// the views run_rollups and metric_rollups, in whole days.
+	// RollupSQL, where set, answers windows longer than LongRange from the rollups, over the
+	// views run_rollups and metric_rollups, in whole days. Days with no rollup yet are in the
+	// views too, computed from their records.
 	RollupSQL string
 	// SQL is DuckDB SQL over spans, logs and metric_points (batches.sql), with the
 	// named parameters $since and $until (timestamps), $arg and $lane (text).
@@ -51,8 +52,10 @@ type Result struct {
 	Rows    [][]any
 	// Files is how many parts, batches or rollups a direct read opened, for tests and debugging.
 	Files int
-	// FromRollups says the answer came from the rollups, in whole days.
-	FromRollups bool
+	// FromRollups says the answer came from the rollups, in whole days. FromRecords says it also
+	// holds days with no rollup yet (the open day, a closed day not rolled up), read from their
+	// records and counted whole, as a rollup counts them.
+	FromRollups, FromRecords bool
 }
 
 // LongRange is the longest window a query with rollups answers from records; longer windows
@@ -138,7 +141,7 @@ ORDER BY lane, runs DESC, outcome`,
 		Since:   24 * time.Hour,
 		Signals: []string{store.Traces},
 		SQL: `
-SELECT time, coalesce(lane, '(by hand)') AS lane, item_key AS item, coalesce(outcome, '(none)') AS outcome,
+SELECT time, coalesce(lane, '(by hand)') AS lane, item_key AS item, actor, coalesce(outcome, '(none)') AS outcome,
        model, round(duration_ms / 1000, 1) AS duration_s, round(cost_usd, 4) AS cost_usd, trace_id
 FROM spans
 WHERE name = 'ynh.run' AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane)
@@ -168,12 +171,12 @@ LIMIT 200`,
 		Since:   7 * 24 * time.Hour,
 		Signals: []string{store.Traces, store.Logs},
 		SQL: `
-SELECT time, 'span' AS record, name, service, outcome, round(duration_ms, 1) AS duration_ms,
+SELECT time, 'span' AS record, name, service, actor, outcome, round(duration_ms, 1) AS duration_ms,
        step_id, trace_id, span_id
 FROM spans
 WHERE item_key = $arg AND time >= $since AND time < $until
 UNION ALL
-SELECT time, 'event', event, service, outcome, NULL, step_id, trace_id, span_id
+SELECT time, 'event', event, service, actor, outcome, NULL, step_id, trace_id, span_id
 FROM logs
 WHERE item_key = $arg AND event IS NOT NULL AND time >= $since AND time < $until
 ORDER BY time, record DESC, name`,
@@ -195,7 +198,7 @@ WITH RECURSIVE t AS (
   FROM t JOIN tree ON t.parent_span_id = tree.span_id
   WHERE tree.depth < 64
 )
-SELECT t.time, tree.depth, t.name, t.service, t.kind, t.status, t.outcome,
+SELECT t.time, tree.depth, t.name, t.service, t.actor, t.kind, t.status, t.outcome,
        round(t.duration_ms, 1) AS duration_ms, t.span_id, t.parent_span_id
 FROM t JOIN tree USING (span_id)
 ORDER BY tree.path, t.span_id`,

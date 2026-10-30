@@ -5,18 +5,26 @@ OpenTelemetry. Tools write telemetry into a crash-safe file spool; `ynr serve` r
 where each record came from, and ships it on. The design is in [the ADRs](docs/adr/README.md),
 and the build order in [ADR-009](docs/adr/009-walking-skeleton.md).
 
-**Status:** the walking skeleton's first slice is done and the second has begun. `ynr serve`
-(the slim build) reads the spool and ships stamped batches to a store, by default a folder on this
-machine, and can also forward to an OTLP/HTTP endpoint such as a local Jaeger. `ynr relay` receives
-a vendor CLI's OTLP, such as Claude Code's, into a spool folder. The full build adds DuckDB: `ynr
-serve` keeps the last 7 days in a hot tier, and `ynr query` asks it, or reads the store directly
-when no server is running. Compaction and the dashboard follow.
+**Documentation:** https://eyelock.github.io/ynr/ has a tutorial, how-to guides, a reference and
+explanations. It is built from [`docs/`](docs) on `main`, so it shows the latest release.
+
+**Status:** the walking skeleton's four slices are done. `ynr serve` reads the spool and ships
+stamped batches to a store, by default a folder on this machine, and can also forward to an
+OTLP/HTTP endpoint such as a local Jaeger. `ynr relay` receives a vendor CLI's OTLP, such as
+Claude Code's, into a spool folder. The full build adds DuckDB: `ynr serve` keeps a hot tier,
+compacts the store and writes rollups, `ynr query` asks it (or reads the store directly), and
+`--ui` serves a local dashboard. `ynr central` does the same over a shared S3 store, with
+compaction leases and a dashboard behind OpenID Connect sign-in. ynr learns the tools' telemetry
+registries, and `ynr conformance` checks a tool against the instrumentation contract.
 
 ## Install
 
 ```bash
 brew install eyelock/tap/ynr
 ```
+
+This is the full build, with DuckDB. The slim build is a separate download on each release; see
+[Install ynr](docs/how-to/install.md).
 
 ## Try it
 

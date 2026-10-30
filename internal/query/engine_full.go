@@ -76,6 +76,8 @@ var promoted = []struct {
 	{"model", []string{"gen_ai.response.model", "gen_ai.request.model"}},
 	{"provenance", []string{"ynr.provenance"}},
 	{"collector_id", []string{"ynr.collector.id"}},
+	{"collector_instance", []string{"ynr.collector.instance"}},
+	{"received_at", []string{"ynr.received_at"}},
 }
 
 func promotedSQL() string {
@@ -85,7 +87,11 @@ func promotedSQL() string {
 		for _, k := range p.keys {
 			picks = append(picks, "pick(resource, attributes, "+literal(k)+")")
 		}
-		cols = append(cols, "coalesce("+strings.Join(picks, ", ")+") AS "+p.column)
+		expr := "coalesce(" + strings.Join(picks, ", ") + ")"
+		if p.column == "received_at" {
+			expr = "TRY_CAST(" + expr + " AS TIMESTAMP)" // a time like time, not text
+		}
+		cols = append(cols, expr+" AS "+p.column)
 	}
 	return strings.Join(cols, ",\n       ")
 }
@@ -162,13 +168,14 @@ func maskedParquet(files []string) string {
 		"CASE WHEN erased(actor) THEN '" + Erased + "' ELSE actor END AS actor) FROM " + parquet(files)
 }
 
-// parquet reads compacted parts.
+// parquet reads compacted parts, matching columns by name: a store holds parts of more than one
+// schema version, and a column an older part lacks reads as NULL.
 func parquet(files []string) string {
 	quoted := make([]string, len(files))
 	for i, f := range files {
 		quoted[i] = literal(f)
 	}
-	return "read_parquet([" + strings.Join(quoted, ", ") + "])"
+	return "read_parquet([" + strings.Join(quoted, ", ") + "], union_by_name = true)"
 }
 
 // runOn runs a named query on a database that has spans, logs and metric_points.
@@ -248,6 +255,6 @@ func erasureSQL() string {
 	return fmt.Sprintf(`
 CREATE OR REPLACE MACRO erased(v) AS list_contains([%s]::VARCHAR[], v);
 CREATE OR REPLACE MACRO mask_attrs(l) AS
-  list_transform(l, a -> CASE WHEN a.k = 'user.name' AND erased(a.v) THEN struct_pack(k := a.k, v := '%s') ELSE a END);
+  list_transform(l, lambda a: CASE WHEN a.k = 'user.name' AND erased(a.v) THEN struct_pack(k := a.k, v := '%s') ELSE a END);
 `, strings.Join(quoted, ", "), Erased)
 }

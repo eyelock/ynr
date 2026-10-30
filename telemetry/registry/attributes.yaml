@@ -20,8 +20,9 @@ groups:
           members:
             - {id: no-manifest, value: no-manifest, brief: A run's records with no manifest from ynf.}
             - {id: bad-manifest, value: bad-manifest, brief: A run's records whose manifest was refused.}
+            - {id: over-budget, value: over-budget, brief: A run folder that exceeded its budget, so ynr stopped reading it.}
         stability: development
-        brief: Why a run's records carry no factory attributes.
+        brief: Why a run's records carry no factory attributes, or why a run folder was cut off.
       - id: ynr.collector.id
         type: string
         stability: development
@@ -34,6 +35,11 @@ groups:
         stability: development
         brief: The job within the collector's pool, recorded as data and never as identity.
         examples: ["job-9"]
+      - id: ynr.received_at
+        type: string
+        stability: development
+        brief: When ynr received the record, as an RFC 3339 time in UTC; stamped by ynr and never taken from the record (ADR-005).
+        examples: ["2026-10-08T10:30:31.250Z"]
       - id: ynr.registry
         type:
           members:

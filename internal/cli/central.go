@@ -39,8 +39,14 @@ func centralState() string {
 }
 
 // centralSocket is the default socket in a state folder, moved under the temporary directory
-// when the path would be too long for a Unix socket, as hotPaths does for a spool.
+// when the path would be too long for a Unix socket, as hotPaths does for a spool. The state
+// folder is made absolute first, so central and every client that asks the same state folder
+// (ynr query reads YNR_CENTRAL_STATE, as central does) arrive at the same socket from any
+// working directory.
 func centralSocket(state string) string {
+	if abs, err := filepath.Abs(state); err == nil {
+		state = abs
+	}
 	socket := filepath.Join(state, "central.sock")
 	if len(socket) <= maxSocket {
 		return socket

@@ -1,7 +1,7 @@
 # Branch Protection Configuration
 
 ynr follows gitflow: `develop` is the default branch and takes feature PRs; `main` takes PRs only
-from `develop`, `release/*` and `hotfix/*`. Each is protected by one repository ruleset. There is
+from `develop`, `release/*` and `hotfix/*`. Each is protected by one repository ruleset, and a third ruleset covers both against deletion and force pushes. There is
 no classic branch protection: the rulesets are the single source of truth. They are managed in
 Terraform (`infra/github/branches.tf`), not by hand.
 
@@ -29,3 +29,10 @@ Everything above for `main`, plus:
 
 - Verify PR source branch must pass, so `main` moves only by release or hotfix
 - Release and hotfix PRs are merge commits, so the back-merge into `develop` is clean
+
+## "Never Delete Main or Develop" (main and develop)
+
+- Branch deletion blocked and force pushes blocked, on both branches
+- No bypass actors: nobody can bypass it, repository admins included, unlike the two rulesets above
+- To delete or rewrite either branch on purpose, disable this ruleset first (change `enforcement`
+  in `infra/github/branches.tf` and apply), then restore it

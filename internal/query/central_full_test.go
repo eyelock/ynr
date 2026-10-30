@@ -318,9 +318,20 @@ func TestWithLeaseStopsWorkWhenTheLeaseIsLost(t *testing.T) {
 	key := LeaseKey(store.Metrics, now.Truncate(time.Hour))
 	held, err := withLease(ctx, r, key, "a", 90*time.Millisecond, time.Now, func(fctx context.Context) error {
 		time.Sleep(10 * time.Millisecond)
-		// Another central takes the lease out from under it.
-		if err := r.Replace(ctx, key, encodeLease(leaseRecord{Holder: "thief", Expires: time.Now().Add(time.Hour)})); err != nil {
-			return err
+		// Another central takes the lease out from under it, as acquireLease would: a conditional
+		// replace, retried if a renewal lands between reading the lease and replacing it.
+		for {
+			_, tag, err := r.GetWithTag(ctx, key)
+			if err != nil {
+				return err
+			}
+			err = r.ReplaceIf(ctx, key, encodeLease(leaseRecord{Holder: "thief", Expires: time.Now().Add(time.Hour)}), tag)
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, store.ErrChanged) {
+				return err
+			}
 		}
 		select {
 		case <-fctx.Done():

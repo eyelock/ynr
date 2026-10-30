@@ -6,6 +6,7 @@ package stamp
 import (
 	"encoding/json"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
 
@@ -20,6 +21,7 @@ const (
 	ProvenanceWarning = names.AttrProvenanceWarning
 	CollectorID       = names.AttrCollectorID
 	CollectorInstance = names.AttrCollectorInstance
+	ReceivedAt        = names.AttrReceivedAt
 
 	Lane        = "ynf.lane"
 	LaneHarness = "ynf.lane.harness"
@@ -50,6 +52,17 @@ type Manifest struct {
 	// UID is the user the run writes as, when that is not the run folder's owner: a run in an
 	// image writes as the image's user. ynr then accepts the run's files from that user too.
 	UID *uint32 `json:"uid,omitempty"`
+	// RunQuotaBytes is how many bytes ynr reads from the run's folder before it stops and warns
+	// (ADR-003): ynf's telemetry.run_quota. Zero, or absent, means spool.DefaultRunBudget.
+	RunQuotaBytes int64 `json:"run_quota_bytes,omitempty"`
+}
+
+// Budget is how many bytes may be read from the run's folder.
+func (m *Manifest) Budget() int64 {
+	if m == nil || m.RunQuotaBytes <= 0 {
+		return spool.DefaultRunBudget
+	}
+	return m.RunQuotaBytes
 }
 
 // ParseManifest parses a manifest and checks it names the run whose folder it is for.
@@ -65,7 +78,11 @@ func ParseManifest(b []byte, runID string) (*Manifest, bool) {
 const (
 	NoManifest  = names.ProvenanceWarningNoManifest
 	BadManifest = names.ProvenanceWarningBadManifest
+	OverBudget  = names.ProvenanceWarningOverBudget
 )
+
+// Now is the clock that says when ynr received a record; tests replace it.
+var Now = time.Now
 
 // Resource stamps one resource's attributes. Every ynr.* attribute the sender set is removed
 // first. For a run, the factory attributes are removed too and set only from the manifest; m is
@@ -74,6 +91,7 @@ func Resource(attrs pcommon.Map, w spool.Writer, id Identity, m *Manifest, warni
 	attrs.RemoveIf(func(k string, _ pcommon.Value) bool { return strings.HasPrefix(k, "ynr.") })
 	attrs.PutStr(Provenance, string(w.Class))
 	attrs.PutStr(CollectorID, id.ID)
+	attrs.PutStr(ReceivedAt, Now().UTC().Format("2006-01-02T15:04:05.000Z"))
 	if id.Instance != "" {
 		attrs.PutStr(CollectorInstance, id.Instance)
 	}
@@ -83,10 +101,10 @@ func Resource(attrs pcommon.Map, w spool.Writer, id Identity, m *Manifest, warni
 	for _, k := range factoryKeys {
 		attrs.Remove(k)
 	}
+	if warning != "" {
+		attrs.PutStr(ProvenanceWarning, warning)
+	}
 	if m == nil {
-		if warning != "" {
-			attrs.PutStr(ProvenanceWarning, warning)
-		}
 		return
 	}
 	attrs.PutStr(RunID, m.Run)

@@ -13,7 +13,8 @@ git:
     - "spoolexporter/*"
 
 builds:
-  # The slim build (ADR-001): no cgo, for laptops and for images.
+  # The slim build (ADR-001): no cgo, for ynh's base image and every run and factory job. Its
+  # archives keep the names (ynr_<version>_<os>_<arch>) that ynh and ynf download.
   - id: ynr
     main: ./cmd/ynr
     binary: ynr
@@ -21,6 +22,29 @@ builds:
     ldflags:
       - -s -w -X github.com/eyelock/ynr.Version={{.Version}}
     env: [CGO_ENABLED=0, GOWORK=off]
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+
+  # The full build (ADR-001): DuckDB, so `query`, `central` and `--ui`. This is the one Homebrew
+  # installs. DuckDB comes as prebuilt static libraries per platform (go.duckdb.org/libduckdb), so
+  # cgo needs only a C/C++ compiler for each target. The release runs on a macOS runner: clang
+  # builds both darwin arches natively, and the linux arches use the cross toolchains the release
+  # workflow puts on the PATH (x86_64-unknown-linux-gnu-g++ and aarch64-unknown-linux-gnu-g++).
+  # zig cc cannot do it: the static libraries need libstdc++, which zig does not ship.
+  - id: ynr-full
+    main: ./cmd/ynr
+    binary: ynr
+    flags: [-trimpath]
+    tags: [full]
+    ldflags:
+      - -s -w -X github.com/eyelock/ynr.Version={{.Version}}
+    env:
+      - CGO_ENABLED=1
+      - GOWORK=off
+      - >-
+        CC={{ if eq .Os "linux" }}{{ if eq .Arch "amd64" }}x86_64{{ else }}aarch64{{ end }}-unknown-linux-gnu-gcc{{ else if eq .Arch "amd64" }}clang -arch x86_64{{ else }}clang -arch arm64{{ end }}
+      - >-
+        CXX={{ if eq .Os "linux" }}{{ if eq .Arch "amd64" }}x86_64{{ else }}aarch64{{ end }}-unknown-linux-gnu-g++{{ else if eq .Arch "amd64" }}clang++ -arch x86_64{{ else }}clang++ -arch arm64{{ end }}
     goos: [darwin, linux]
     goarch: [amd64, arm64]
 
@@ -40,6 +64,14 @@ archives:
     ids: [ynr]
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+  # The full build, under its own name so the slim archives above keep theirs.
+  - id: ynr-full
+    ids: [ynr-full]
+    formats: [tar.gz]
+    name_template: "ynr-full_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
       - README.md
 
@@ -77,7 +109,8 @@ changelog:
     exclude: ["^docs:", "^test:", "^ci:"]
 
 brews:
-  - ids: [ynr]
+  # Installs the full build (ADR-001).
+  - ids: [ynr-full]
     repository:
       owner: eyelock
       name: homebrew-tap

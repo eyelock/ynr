@@ -77,28 +77,26 @@ func queryCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 
 	// Ask the running ynr serve, whose hot tier answers in milliseconds; read the store
 	// directly when none answers, or when --store names one.
-	if !direct && (*root != "" || *socketFlag != "") {
-		_, socket := hotPaths(*root)
-		if *socketFlag != "" {
-			socket = *socketFlag
-		}
-		doc, res, err := query.Ask(ctx, socket, name, raw)
-		var se *query.ServerError
-		switch {
-		case err == nil:
-			return write(stdout, stderr, *format, q, query.Params{Arg: doc.Arg, Lane: doc.Lane, Since: doc.Since, Until: doc.Until}, res)
-		case errors.As(err, &se) && se.Status == http.StatusBadRequest:
-			_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
-			return ExitUsage
-		case errors.As(err, &se):
-			_, _ = fmt.Fprintf(stderr, "ynr: ynr serve: %v\n", err)
-			return ExitAdapter
-		case errors.Is(err, query.ErrNoServer) && *socketFlag != "":
-			_, _ = fmt.Fprintf(stderr, "ynr: nothing is answering on %s; is ynr central running?\n", *socketFlag)
-			return ExitAdapter
-		case !errors.Is(err, query.ErrNoServer):
-			_, _ = fmt.Fprintf(stderr, "ynr: asking ynr serve: %v\n", err)
-			return ExitAdapter
+	if !direct {
+		for _, socket := range querySockets(*root, *socketFlag) {
+			doc, res, err := query.Ask(ctx, socket, name, raw)
+			var se *query.ServerError
+			switch {
+			case err == nil:
+				return write(stdout, stderr, *format, q, query.Params{Arg: doc.Arg, Lane: doc.Lane, Since: doc.Since, Until: doc.Until}, res)
+			case errors.As(err, &se) && se.Status == http.StatusBadRequest:
+				_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
+				return ExitUsage
+			case errors.As(err, &se):
+				_, _ = fmt.Fprintf(stderr, "ynr: ynr serve: %v\n", err)
+				return ExitAdapter
+			case errors.Is(err, query.ErrNoServer) && *socketFlag != "":
+				_, _ = fmt.Fprintf(stderr, "ynr: nothing is answering on %s; is ynr central running?\n", *socketFlag)
+				return ExitAdapter
+			case !errors.Is(err, query.ErrNoServer):
+				_, _ = fmt.Fprintf(stderr, "ynr: asking ynr serve: %v\n", err)
+				return ExitAdapter
+			}
 		}
 	}
 	if *storeURL == "" {
@@ -120,6 +118,25 @@ func queryCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return ExitAdapter
 	}
 	return write(stdout, stderr, *format, q, p, res)
+}
+
+// querySockets are the sockets ynr query asks, in order. An explicit --socket is the only one.
+// Otherwise it is the ynr serve on the spool root, then the ynr central on its default state
+// folder (YNR_CENTRAL_STATE, as central reads it), each derived exactly as the server derives
+// its own, so a state folder too deep for a socket needs no --socket.
+func querySockets(root, socket string) []string {
+	if socket != "" {
+		return []string{socket}
+	}
+	var out []string
+	if root != "" {
+		_, s := hotPaths(root)
+		out = append(out, s)
+	}
+	if state := env("YNR_CENTRAL_STATE", centralState()); state != "" {
+		out = append(out, centralSocket(state))
+	}
+	return out
 }
 
 func write(stdout, stderr io.Writer, format string, q *query.Query, p query.Params, res *query.Result) int {

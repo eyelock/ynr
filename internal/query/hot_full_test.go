@@ -192,3 +192,22 @@ func TestServeHotAnswersOnItsSocket(t *testing.T) {
 		t.Fatalf("asking a stopped server = %v", err)
 	}
 }
+
+// TestHotTierLongWindowSeesToday: a window wider than the hot tier reads the store, and one
+// longer than a week there still includes today.
+func TestHotTierLongWindowSeesToday(t *testing.T) {
+	r := openStore(t)
+	shipRun(t, r, "1111111111111111", 1.5, now.Add(-time.Hour))
+	h := openHot(t, filepath.Join(t.TempDir(), "hot.duckdb"), r)
+	if err := h.Sync(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, since := range []time.Duration{30 * 24 * time.Hour, 8 * 24 * time.Hour} { // beyond the hot window, then within a wider one
+		h.window = 60 * 24 * time.Hour
+		res := hotRun(t, h, "cost", Params{Since: now.Add(-since), Until: now})
+		if got := rows(res); len(got) != 1 || got[0] != "claude-opus-5-5 1 1.5 1000 200" {
+			t.Fatalf("%v: cost = %v", since, got)
+		}
+		h.window = 7 * 24 * time.Hour
+	}
+}

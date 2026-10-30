@@ -408,3 +408,43 @@ func TestEvictOldestClosedFirst(t *testing.T) {
 		t.Fatal("a zero cap evicted")
 	}
 }
+
+func TestRunFolderOverBudgetIsCutOff(t *testing.T) {
+	root := setup(t)
+	lines := "aaaa\nbbbb\ncccc\n" // 5 bytes each
+	writeFile(t, filepath.Join(root, "runs/r1/x-1.jsonl"), lines)
+	writeFile(t, filepath.Join(root, "runs/r2/x-1.jsonl"), lines)
+	writeFile(t, filepath.Join(root, "local/y-1.jsonl"), lines)
+	r := newReader(t, root, 100)
+	r.RunBudget = func(w Writer) int64 {
+		if w.Name == "r1" {
+			return 12 // two whole lines
+		}
+		return 1 << 20
+	}
+	var warned []string
+	var out []got
+	err := r.Poll(context.Background(), func(w Writer, line []byte) error {
+		out = append(out, got{w.Rel, string(line)})
+		if r.OverBudget(w) {
+			warned = append(warned, w.Rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 8 || len(warned) != 2 || warned[0] != warned[1] || !strings.Contains(warned[0], "r1") {
+		t.Fatalf("out %v warned %v", out, warned)
+	}
+	if _, err := os.Stat(filepath.Join(root, "runs/r1/x-1.jsonl")); err != nil {
+		t.Fatal("the cut-off file was deleted")
+	}
+	if s := r.Counters.Snapshot(); s.OverBudget != 1 || s.Malformed != 0 {
+		t.Errorf("counters %+v", s)
+	}
+	// Nothing more is read from r1, however often it is polled.
+	if again := poll(t, r); len(again) != 0 || r.Counters.Snapshot().OverBudget != 1 {
+		t.Fatalf("read again: %v", again)
+	}
+}
