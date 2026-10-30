@@ -5,8 +5,11 @@ package query
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -118,4 +121,47 @@ func TestLoadErasure(t *testing.T) {
 	if _, err := LoadErasure(p); err == nil {
 		t.Fatal("accepted a name with a space, which is not a handle")
 	}
+}
+
+// TestErasureIsVisibleInQueries: recent, item and trace return the actor, so a person can check
+// that an erased handle reads (erased), before and after compaction rewrites its hour.
+func TestErasureIsVisibleInQueries(t *testing.T) {
+	defer SetErasure(nil)
+	r := openStore(t)
+	item := "github.com/eyelock/ynr#9"
+	hour := now.Truncate(time.Hour).Add(-3 * time.Hour)
+	a, b := actorSpan("1111111111111111", "github.com/alice", hour.Add(time.Minute)),
+		actorSpan("2222222222222222", "github.com/bob", hour.Add(2*time.Minute))
+	b.trace = traceB
+	a.res["ynf.item.key"], b.res["ynf.item.key"] = item, item
+	ship(t, r, store.Traces, hour.Add(10*time.Minute), "local.a", traceLine(t, a, b))
+	ship(t, r, store.Logs, hour.Add(10*time.Minute), "local.a", eventLine(t, "ynh.run.started", hour,
+		map[string]any{"service.name": "ynh", "ynf.item.key": item}, map[string]any{"user.name": "github.com/alice"}))
+
+	actorsOf := func(name, arg string) string {
+		res := run(t, r, name, Params{Arg: arg, Since: now.Add(-24 * time.Hour), Until: now})
+		ci := col(t, res, "actor")
+		var out []string
+		for _, row := range res.Rows {
+			out = append(out, fmt.Sprint(row[ci]))
+		}
+		sort.Strings(out)
+		return strings.Join(out, ",")
+	}
+	check := func(stage, alice string) {
+		t.Helper()
+		for name, arg := range map[string]string{"recent": "", "item": item, "trace": traceA} {
+			want := map[string]string{
+				"recent": alice + ",github.com/bob", "item": alice + "," + alice + ",github.com/bob", "trace": alice,
+			}[name]
+			if got := actorsOf(name, arg); got != want {
+				t.Errorf("%s: %s actors = %q, want %q", stage, name, got, want)
+			}
+		}
+	}
+	check("before", "github.com/alice")
+	SetErasure([]string{"github.com/alice"})
+	check("masked", "(erased)")
+	compact(t, r, now)
+	check("compacted", "(erased)")
 }

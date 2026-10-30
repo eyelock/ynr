@@ -120,7 +120,7 @@ only those hours, never a scan of the whole retention window.
 attributes, and of every run, from its run span (`ynh.run`), by lane, model, outcome, harness and
 repository: the runners report a run's cost and tokens on its span. A day is rolled up by the
 hours it was received in, so a record is counted on exactly one day. Long-range views, such as
-cost by model this year, read the rollups in whole days and months. Hourly metric detail is kept
+cost by model this year, read the rollups in whole days and months, and read the records for the days not rolled up yet (the open day), so a long window is never missing today. Hourly metric detail is kept
 for 30 days and the rollups for 13 months (NFR-15).
 
 **Retention** is per signal (NFR-15): lifecycle rules on each signal's prefixes for S3, and

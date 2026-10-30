@@ -49,6 +49,7 @@ The latest runs, newest first.
 | `time` | When the run started. |
 | `lane` | The lane id, or `(by hand)`. |
 | `item` | The work item key. |
+| `actor` | The `user.name` handle of the person on the run, or `(erased)` if it is on the erasure list. |
 | `outcome` | The outcome, or `(none)`. |
 | `model` | The model. |
 | `duration_s` | The duration in seconds. |
@@ -80,6 +81,7 @@ the item appears.
 | `record` | `span` or `event`. |
 | `name` | The span name, or the event name. |
 | `service` | The service that wrote it. |
+| `actor` | The `user.name` handle, or `(erased)`. |
 | `outcome` | The outcome, if any. |
 | `duration_ms` | The span's duration in milliseconds; empty for an event. |
 | `step_id` | The `ynf.step.id`. |
@@ -96,6 +98,7 @@ One trace's spans as a tree. The argument is the trace id, in any case.
 | `depth` | The span's depth in the tree. The text output shows it as indentation of `name`, and the JSON output has the column. |
 | `time` | The span's start. |
 | `name`, `service`, `kind` | What the span is. |
+| `actor` | The `user.name` handle, or `(erased)`. |
 | `status` | `ok`, `error` or `unset`. |
 | `outcome` | The outcome, if any. |
 | `duration_ms` | The duration in milliseconds. |
@@ -122,8 +125,20 @@ Ordered by cost, highest first.
 from records, in whole days. The `median_s` column is then empty, because a median cannot be rolled
 up. The other queries always read records.
 
-Rollups are written for a day after it has closed. A window longer than 7 days therefore leaves out
-days with no rollup yet, today included, and answers `no records in this window` when none exists.
+Rollups are written for a day after it has closed, so the open day, and a closed day whose rollup is
+not written yet (ynr serve was down), have none. For those days the query reads the records received
+that day instead, with the same grouping a rollup uses, and adds them to the rollups. Each day is
+counted once, by the day its records were received, and whole: a day is never half rollup and half
+records. A window longer than 7 days therefore includes today, in either build of the store (folder
+or S3), and in the hot tier when the window reaches back past what the hot tier holds. Only records still
+in the store can be read: a day that has neither a rollup nor records is empty.
+
+In the result, `FromRollups` is true for these answers, and `FromRecords` is also true when some
+days came from records.
+
+Handles: `recent`, `item` and `trace` show `actor`, the `user.name` handle, so a person can check an
+erasure ([Set retention and erase a person](../how-to/set-retention-and-erase-a-person.md)).
+The dashboard, which shows these tables, requires sign-in on `ynr central`.
 
 ## Promoted columns
 
