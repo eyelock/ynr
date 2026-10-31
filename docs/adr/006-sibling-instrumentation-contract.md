@@ -110,6 +110,6 @@ tool.
 
 - 2026-10-05: drafted.
 - 2026-10-31: no paths or host names in exported attributes, enforced for vendor CLIs by the relay
-  (David's decision, from the review of [ynh #649](https://github.com/eyelock/ynh/pull/649)).
+  (decided in the review of [ynh #649](https://github.com/eyelock/ynh/pull/649)).
 - 2026-10-31: the relay also drops `user.email`, `user.full_name` and any value that is an email
   address, enforcing rule 10's ban on email addresses and names for vendor CLIs.
