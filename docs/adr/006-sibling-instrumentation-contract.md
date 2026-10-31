@@ -46,7 +46,15 @@ tool.
     memory bodies. Ids, enums, counts, durations and hashes only. People appear only by their
     host-qualified handle, never by name or email (ADR-002). It redacts secrets from string values
     at the source, before anything reaches the spool, and runs vendor CLIs with their content
-    options off.
+    options off. No paths and no host names either: a tool never exports its working directory,
+    the machine's name, or a path under the user's home, which names their account. Vendor CLIs
+    cannot always be told this (Codex sends `cwd` and `host.name` and has no setting to stop it),
+    so `ynr relay` enforces it for every vendor: before anything reaches the spool, it drops
+    `cwd`, `host.name`, `host.id`, `host.ip`, `host.mac`, `process.owner`, `process.command`,
+    `process.command_line`, `process.command_args` and `process.executable.path`, and any
+    attribute whose value is the user's home folder or an absolute path under it, from traces,
+    metrics and logs (resource, scope, span, span event and link, data point and exemplar, and log
+    record attributes). They are dropped, not hashed.
 11. **Records outcomes, not just errors.** A unit of work's span ends with the tool's own outcome
     vocabulary as an attribute (ynf's `converged`, `budget`, `stuck`, …) and its status set from
     it.
@@ -88,8 +96,11 @@ tool.
 
 ## Open questions
 
-- None of its own.
+- Whether the relay should keep a hashed form of a host or path attribute instead of dropping it,
+  so runs on one machine can still be grouped. Until that is decided, it drops them.
 
 ## History
 
 - 2026-10-05: drafted.
+- 2026-10-31: no paths or host names in exported attributes, enforced for vendor CLIs by the relay
+  (David's decision, from the review of [ynh #649](https://github.com/eyelock/ynh/pull/649)).

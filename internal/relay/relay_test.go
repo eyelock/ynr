@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric"
@@ -275,5 +276,113 @@ func TestRelay_IdleConnectionDoesNotHoldShutdown(t *testing.T) {
 	stop() // reports an error through t.Errorf if Serve returns one
 	if d := time.Since(start); d > 5*time.Second {
 		t.Errorf("stop took %v", d)
+	}
+}
+
+// TestRelay_StripsPathAndHostAttributes: a span, a data point and a log record carrying cwd,
+// host.name and a path under the user's home, as Codex sends them, leave the relay without them,
+// and everything else arrives untouched (ADR-006).
+func TestRelay_StripsPathAndHostAttributes(t *testing.T) {
+	const home = "/Users/someone"
+	leaky := func(m pcommon.Map) {
+		m.PutStr("cwd", home+"/.ynh/run/x")
+		m.PutStr("host.name", "someones-laptop")
+		m.PutStr("codex.file", home+"/src/secret.go")
+		m.PutStr("home.itself", home)
+		args := m.PutEmptySlice("codex.args")
+		args.AppendEmpty().SetStr("--flag")
+		args.AppendEmpty().SetStr(home + "/notes.md")
+		nested := m.PutEmptyMap("codex.ctx")
+		nested.PutStr("dir", home+"/src")
+		nested.PutStr("model", "gpt-5")
+		m.PutStr("keep.sibling", "/Users/someoneelse/x") // not under home: a prefix match only
+		m.PutStr("keep.tmp", "/tmp/x")
+		m.PutStr("service.name", "codex")
+	}
+	dir := t.TempDir()
+	r, stop := start(t, Config{Dir: dir, Home: home + "/"})
+
+	td := ptrace.NewTraces()
+	rs := td.ResourceSpans().AppendEmpty()
+	leaky(rs.Resource().Attributes())
+	ss := rs.ScopeSpans().AppendEmpty()
+	leaky(ss.Scope().Attributes())
+	sp := ss.Spans().AppendEmpty()
+	sp.SetName("codex.turn")
+	sp.SetTraceID([16]byte{1})
+	sp.SetSpanID([8]byte{2})
+	leaky(sp.Attributes())
+	leaky(sp.Events().AppendEmpty().Attributes())
+	leaky(sp.Links().AppendEmpty().Attributes())
+	tb, _ := ptraceotlp.NewExportRequestFromTraces(td).MarshalProto()
+	if resp := post(t, r.Endpoint()+"/v1/traces", "application/x-protobuf", tb, false); resp.StatusCode != 200 {
+		t.Fatalf("traces: %d", resp.StatusCode)
+	}
+
+	md := pmetric.NewMetrics()
+	rm := md.ResourceMetrics().AppendEmpty()
+	leaky(rm.Resource().Attributes())
+	m := rm.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	m.SetName("codex.tokens")
+	dp := m.SetEmptyHistogram().DataPoints().AppendEmpty()
+	dp.SetCount(1)
+	leaky(dp.Attributes())
+	leaky(dp.Exemplars().AppendEmpty().FilteredAttributes())
+	mb, _ := pmetricotlp.NewExportRequestFromMetrics(md).MarshalJSON()
+	if resp := post(t, r.Endpoint()+"/v1/metrics", "application/json", mb, false); resp.StatusCode != 200 {
+		t.Fatalf("metrics: %d", resp.StatusCode)
+	}
+
+	ld := plog.NewLogs()
+	rl := ld.ResourceLogs().AppendEmpty()
+	leaky(rl.Resource().Attributes())
+	lr := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	lr.SetEventName("codex.tool_result")
+	leaky(lr.Attributes())
+	lb, _ := plogotlp.NewExportRequestFromLogs(ld).MarshalProto()
+	if resp := post(t, r.Endpoint()+"/v1/logs", "application/x-protobuf", lb, true); resp.StatusCode != 200 {
+		t.Fatalf("logs: %d", resp.StatusCode)
+	}
+
+	stop()
+	lines := spoolLines(t, dir)
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3", len(lines))
+	}
+	for i, l := range lines {
+		for _, bad := range []string{`"cwd"`, `"host.name"`, home + "/", `"home.itself"`, `"codex.args"`, `"dir"`} {
+			if strings.Contains(l, bad) {
+				t.Errorf("line %d still carries %s: %s", i, bad, l)
+			}
+		}
+		for _, good := range []string{`"keep.sibling"`, `"keep.tmp"`, `"service.name"`, `"model"`} {
+			if !strings.Contains(l, good) {
+				t.Errorf("line %d lost %s: %s", i, good, l)
+			}
+		}
+	}
+	tr := ptraceotlp.NewExportRequest()
+	if err := tr.UnmarshalJSON([]byte(lines[0])); err != nil {
+		t.Fatal(err)
+	}
+	if n := tr.Traces().ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Name(); n != "codex.turn" {
+		t.Errorf("span = %s", n)
+	}
+	// Five attributes and the nested dir from each leaky map: five maps in the trace, three in
+	// the metrics, two in the logs.
+	if s := r.Stats(); s.Stripped != 6*10 || s.Accepted != 3 {
+		t.Errorf("stats = %+v", s)
+	}
+}
+
+func TestScrubber_NoHome(t *testing.T) {
+	for _, home := range []string{"", "/", "relative"} {
+		s := newScrubber(home)
+		m := pcommon.NewMap()
+		m.PutStr("cwd", "/x")
+		m.PutStr("path", "/Users/a")
+		if n := s.attrs(m); n != 1 || m.Len() != 1 {
+			t.Errorf("home %q: dropped %d, left %d", home, n, m.Len())
+		}
 	}
 }
