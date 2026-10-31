@@ -2,6 +2,7 @@ package relay
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -10,11 +11,14 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace"
 )
 
-// Stripped names the attributes the relay always drops, wherever they appear: the working
-// directory and the host and process attributes that name the machine or the user on it. A vendor
+// Stripped names the attributes the relay always drops, wherever they appear: a person's email
+// address and full name, the working directory, and the host and process attributes that name
+// the machine or the user on it. A vendor
 // CLI sends them and not every vendor can be told not to (Codex sends cwd and host.name), so the
 // relay enforces ADR-006's "no content" rule for them at one point, for every vendor.
 var Stripped = []string{
+	"user.email",
+	"user.full_name",
 	"cwd",
 	"host.name",
 	"host.id",
@@ -27,8 +31,12 @@ var Stripped = []string{
 	"process.executable.path",
 }
 
-// scrubber drops the Stripped attributes, and any attribute whose string value is the user's home
-// folder or an absolute path under it, from resources, scopes, spans, span events and links,
+// email matches a value that is an email address and nothing else. Only a whole value counts, so a
+// sentence or a URL that mentions one is left alone.
+var email = regexp.MustCompile(`^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$`)
+
+// scrubber drops the Stripped attributes, any attribute whose string value is an email address,
+// and any whose string value is the user's home folder or an absolute path under it, from resources, scopes, spans, span events and links,
 // metric data points and exemplars, and log records. A map value is scrubbed key by key; a list
 // holding such a path is dropped whole.
 type scrubber struct {
@@ -74,7 +82,7 @@ func (s *scrubber) attrs(m pcommon.Map) int {
 func (s *scrubber) drop(v pcommon.Value, n *int) bool {
 	switch v.Type() {
 	case pcommon.ValueTypeStr:
-		return s.underHome(v.Str())
+		return s.underHome(v.Str()) || email.MatchString(v.Str())
 	case pcommon.ValueTypeMap:
 		*n += s.attrs(v.Map())
 	case pcommon.ValueTypeSlice:
