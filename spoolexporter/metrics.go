@@ -12,7 +12,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
-// MetricExporter writes metrics to a Writer. It never returns an error.
+// MetricExporter sends metrics to a sink: a Writer (as spool lines) or an
+// HTTPSender (as OTLP/HTTP requests). It never returns an error.
 type MetricExporter struct {
 	w           sink
 	temporality sdkmetric.TemporalitySelector
@@ -70,7 +71,8 @@ func (e *MetricExporter) Aggregation(k sdkmetric.InstrumentKind) sdkmetric.Aggre
 	return e.aggregation(k)
 }
 
-// Export writes rm as one ExportMetricsServiceRequest line.
+// Export sends rm as one ExportMetricsServiceRequest: a line in the spool,
+// or a request to the endpoint.
 func (e *MetricExporter) Export(ctx context.Context, rm *metricdata.ResourceMetrics) error {
 	if rm == nil {
 		return nil
@@ -87,14 +89,15 @@ func (e *MetricExporter) Export(ctx context.Context, rm *metricdata.ResourceMetr
 	return nil
 }
 
-// ForceFlush flushes the Writer's open file to disk, bounded by its
-// SyncTimeout.
+// ForceFlush flushes a Writer's open file to disk, bounded by its
+// SyncTimeout. With an HTTPSender it does nothing, since each export is
+// already sent (or counted as failed) before it returns.
 func (e *MetricExporter) ForceFlush(context.Context) error {
 	e.w.sync()
 	return nil
 }
 
-// Shutdown stops the exporter. It leaves the Writer open; see
+// Shutdown stops the exporter. It leaves the Writer (or HTTPSender) open; see
 // TraceExporter.Shutdown.
 func (e *MetricExporter) Shutdown(context.Context) error {
 	e.stopped.Store(true)

@@ -13,7 +13,8 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// TraceExporter writes spans to a Writer. It never returns an error.
+// TraceExporter sends spans to a sink: a Writer (as spool lines) or an
+// HTTPSender (as OTLP/HTTP requests). It never returns an error.
 type TraceExporter struct {
 	w       sink
 	stopped atomic.Bool
@@ -28,7 +29,8 @@ func NewTraceExporter(w *Writer) *TraceExporter { return &TraceExporter{w: w} }
 // HTTP. It never returns an error.
 func NewHTTPTraceExporter(h *HTTPSender) *TraceExporter { return &TraceExporter{w: h} }
 
-// ExportSpans writes spans as one ExportTraceServiceRequest line.
+// ExportSpans sends spans as one ExportTraceServiceRequest: a line in the
+// spool, or a request to the endpoint.
 func (e *TraceExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
 	if len(spans) == 0 {
 		return nil
@@ -41,14 +43,15 @@ func (e *TraceExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOn
 	return nil
 }
 
-// Shutdown stops the exporter. It leaves the Writer open, since the log
+// Shutdown stops the exporter. It leaves the Writer (or HTTPSender) open, since the log
 // exporter may share it; close the Writer once both have shut down.
 func (e *TraceExporter) Shutdown(context.Context) error {
 	e.stopped.Store(true)
 	return nil
 }
 
-// LogExporter writes log records to a Writer. It never returns an error.
+// LogExporter sends log records to a sink: a Writer (as spool lines) or an
+// HTTPSender (as OTLP/HTTP requests). It never returns an error.
 type LogExporter struct {
 	w       sink
 	stopped atomic.Bool
@@ -63,7 +66,8 @@ func NewLogExporter(w *Writer) *LogExporter { return &LogExporter{w: w} }
 // over HTTP. It never returns an error.
 func NewHTTPLogExporter(h *HTTPSender) *LogExporter { return &LogExporter{w: h} }
 
-// Export writes records as one ExportLogsServiceRequest line.
+// Export sends records as one ExportLogsServiceRequest: a line in the spool,
+// or a request to the endpoint.
 func (e *LogExporter) Export(ctx context.Context, records []sdklog.Record) error {
 	if len(records) == 0 {
 		return nil
@@ -76,14 +80,15 @@ func (e *LogExporter) Export(ctx context.Context, records []sdklog.Record) error
 	return nil
 }
 
-// ForceFlush flushes the Writer's open file to disk, bounded by its
-// SyncTimeout.
+// ForceFlush flushes a Writer's open file to disk, bounded by its
+// SyncTimeout. With an HTTPSender it does nothing, since each export is
+// already sent (or counted as failed) before it returns.
 func (e *LogExporter) ForceFlush(context.Context) error {
 	e.w.sync()
 	return nil
 }
 
-// Shutdown stops the exporter. It leaves the Writer open; see
+// Shutdown stops the exporter. It leaves the Writer (or HTTPSender) open; see
 // TraceExporter.Shutdown.
 func (e *LogExporter) Shutdown(context.Context) error {
 	e.stopped.Store(true)

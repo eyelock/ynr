@@ -1,10 +1,11 @@
 // Package spoolexporter is an OpenTelemetry exporter that writes traces,
 // metrics and logs as OTLP JSON lines into a spool folder, where a separate
-// reader collects them.
+// reader collects them. It can also post the same OTLP/JSON to an operator's
+// OTLP/HTTP endpoint (see "Sending to an operator's endpoint").
 //
-// It imports nothing but the standard library and the OpenTelemetry SDK: no
-// OTLP network exporter, no gRPC, no protobuf. It knows nothing of the
-// program using it or of the reader.
+// It imports nothing but the standard library and the OpenTelemetry SDK: the
+// network exporter is net/http, with no gRPC and no protobuf. It knows
+// nothing of the program using it or of the reader.
 //
 // # Format
 //
@@ -75,6 +76,11 @@
 // key=value list, values percent-decoded, the per-signal list winning), and
 // TIMEOUT in milliseconds (the longest of the general and per-signal values
 // applies to every signal). The body is application/json.
+//
+// A signal with no endpoint is not sent: if only some per-signal endpoints
+// are set and there is no general OTEL_EXPORTER_OTLP_ENDPOINT, the other
+// signals' exporters discard what they are given, and do not count it in
+// Stats.
 //
 // It does not support, and HTTPOptionsFromEnv reports by name so the caller
 // can print one note and send nothing: a PROTOCOL other than http/json (grpc
