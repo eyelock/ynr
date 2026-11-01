@@ -48,11 +48,12 @@ tool.
     at the source, before anything reaches the spool, and runs vendor CLIs with their content
     options off. No paths and no host names either: a tool never exports its working directory,
     the machine's name, or a path under the user's home, which names their account. Vendor CLIs
-    cannot always be told this (Codex sends `cwd` and `host.name` and has no setting to stop it),
-    so `ynr relay` enforces it for every vendor: before anything reaches the spool, it drops
-    `cwd`, `host.name`, `host.id`, `host.ip`, `host.mac`, `process.owner`, `process.command`,
-    `process.command_line`, `process.command_args` and `process.executable.path`, and any
-    attribute whose value is the user's home folder or an absolute path under it, from traces,
+    cannot always be told this (Codex sends `cwd` and `host.name` and has no setting to stop it,
+    and its logs carry `user.email`), so `ynr relay` enforces it for every vendor: before anything
+    reaches the spool, it drops `user.email`, `user.full_name`, `cwd`, `host.name`, `host.id`, `host.ip`, `host.mac`, `process.owner`, `process.command`,
+    `process.command_line`, `process.command_args` and `process.executable.path`, any attribute
+    whose whole value is an email address, and any whose value is the user's home folder or an
+    absolute path under it, from traces,
     metrics and logs (resource, scope, span, span event and link, data point and exemplar, and log
     record attributes). They are dropped, not hashed.
 11. **Records outcomes, not just errors.** A unit of work's span ends with the tool's own outcome
@@ -98,9 +99,17 @@ tool.
 
 - Whether the relay should keep a hashed form of a host or path attribute instead of dropping it,
   so runs on one machine can still be grouped. Until that is decided, it drops them.
+- Whether the relay drops a vendor's `user.name`. ADR-002 puts a person's host-qualified handle
+  in `user.name`, so a handle there is allowed, but a vendor may put a display name there. The
+  relay keeps it for now.
+- Whether account ids (`user.id`, `user.account_id`, `user.account_uuid`) are ids, which are
+  allowed, or identify a person and must go. Claude Code 2.1.316 sends `user.id` on its spans,
+  metrics and logs; the relay keeps account ids for now.
 
 ## History
 
 - 2026-10-05: drafted.
 - 2026-10-31: no paths or host names in exported attributes, enforced for vendor CLIs by the relay
-  (David's decision, from the review of [ynh #649](https://github.com/eyelock/ynh/pull/649)).
+  (decided in the review of [ynh #649](https://github.com/eyelock/ynh/pull/649)).
+- 2026-10-31: the relay also drops `user.email`, `user.full_name` and any value that is an email
+  address, enforcing rule 10's ban on email addresses and names for vendor CLIs.
