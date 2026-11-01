@@ -14,7 +14,7 @@ import (
 
 // MetricExporter writes metrics to a Writer. It never returns an error.
 type MetricExporter struct {
-	w           *Writer
+	w           sink
 	temporality sdkmetric.TemporalitySelector
 	aggregation sdkmetric.AggregationSelector
 	stopped     atomic.Bool
@@ -39,6 +39,16 @@ func WithAggregation(s sdkmetric.AggregationSelector) MetricOption {
 // NewMetricExporter returns a metric exporter writing to w. Register it with
 // a periodic reader.
 func NewMetricExporter(w *Writer, opts ...MetricOption) *MetricExporter {
+	return newMetricExporter(w, opts)
+}
+
+// NewHTTPMetricExporter returns a metric exporter sending to h, as OTLP/JSON
+// over HTTP. Register it with a periodic reader.
+func NewHTTPMetricExporter(h *HTTPSender, opts ...MetricOption) *MetricExporter {
+	return newMetricExporter(h, opts)
+}
+
+func newMetricExporter(w sink, opts []MetricOption) *MetricExporter {
 	e := &MetricExporter{
 		w:           w,
 		temporality: sdkmetric.DefaultTemporalitySelector,
@@ -61,7 +71,7 @@ func (e *MetricExporter) Aggregation(k sdkmetric.InstrumentKind) sdkmetric.Aggre
 }
 
 // Export writes rm as one ExportMetricsServiceRequest line.
-func (e *MetricExporter) Export(_ context.Context, rm *metricdata.ResourceMetrics) error {
+func (e *MetricExporter) Export(ctx context.Context, rm *metricdata.ResourceMetrics) error {
 	if rm == nil {
 		return nil
 	}
@@ -70,17 +80,17 @@ func (e *MetricExporter) Export(_ context.Context, rm *metricdata.ResourceMetric
 		return nil
 	}
 	if e.stopped.Load() {
-		e.w.dropped.Add(int64(points))
+		e.w.drop(points)
 		return nil
 	}
-	e.w.writeEncoded(req, points)
+	e.w.send(ctx, signalMetrics, req, points)
 	return nil
 }
 
 // ForceFlush flushes the Writer's open file to disk, bounded by its
 // SyncTimeout.
 func (e *MetricExporter) ForceFlush(context.Context) error {
-	e.w.Sync()
+	e.w.sync()
 	return nil
 }
 

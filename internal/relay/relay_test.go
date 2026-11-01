@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/eyelock/ynr/spoolexporter"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
@@ -21,6 +22,12 @@ import (
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
+	"go.opentelemetry.io/otel/attribute"
+	otellog "go.opentelemetry.io/otel/log"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 )
 
 // start runs a relay on a free loopback port until the test ends, and returns it with a stop
@@ -413,5 +420,65 @@ func TestScrubber_NoHome(t *testing.T) {
 		if n := s.attrs(m); n != 1 || m.Len() != 1 {
 			t.Errorf("home %q: dropped %d, left %d", home, n, m.Len())
 		}
+	}
+}
+
+// The spool exporter's OTLP/HTTP sender, pointed at the relay as an operator's
+// OTEL_EXPORTER_OTLP_ENDPOINT, delivers every signal and the relay decodes it.
+func TestRelay_ReceivesSpoolexporterHTTPSender(t *testing.T) {
+	dir := t.TempDir()
+	r, stop := start(t, Config{Dir: dir})
+	opts, ok, why := spoolexporter.HTTPOptionsFromEnv(func(k string) string {
+		if k == "OTEL_EXPORTER_OTLP_ENDPOINT" {
+			return r.Endpoint()
+		}
+		return ""
+	})
+	if !ok || why != "" {
+		t.Fatalf("configured=%v why=%q", ok, why)
+	}
+	h := spoolexporter.NewHTTPSender(opts)
+	ctx := context.Background()
+	res := resource.NewSchemaless(attribute.String("service.name", "ynh"))
+
+	tp := sdktrace.NewTracerProvider(sdktrace.WithResource(res), sdktrace.WithBatcher(spoolexporter.NewHTTPTraceExporter(h)))
+	_, sp := tp.Tracer("scope").Start(ctx, "ynh.run")
+	sp.End()
+	lp := sdklog.NewLoggerProvider(sdklog.WithResource(res),
+		sdklog.WithProcessor(sdklog.NewBatchProcessor(spoolexporter.NewHTTPLogExporter(h))))
+	var rec otellog.Record
+	rec.SetEventName("ynh.run")
+	lp.Logger("scope").Emit(ctx, rec)
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithResource(res),
+		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(spoolexporter.NewHTTPMetricExporter(h))))
+	c, _ := mp.Meter("scope").Int64Counter("ynh.runs")
+	c.Add(ctx, 1)
+	for _, shutdown := range []func(context.Context) error{tp.Shutdown, lp.Shutdown, mp.Shutdown} {
+		if err := shutdown(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s := h.Stats(); s != (spoolexporter.Stats{}) {
+		t.Fatalf("sender stats = %+v", s)
+	}
+
+	stop()
+	var gotSpan, gotLog, gotMetric bool
+	for _, line := range spoolLines(t, dir) {
+		if tr := ptraceotlp.NewExportRequest(); tr.UnmarshalJSON([]byte(line)) == nil && tr.Traces().SpanCount() > 0 {
+			gotSpan = tr.Traces().ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Name() == "ynh.run"
+		}
+		if lr := plogotlp.NewExportRequest(); lr.UnmarshalJSON([]byte(line)) == nil && lr.Logs().LogRecordCount() > 0 {
+			gotLog = lr.Logs().ResourceLogs().At(0).ScopeLogs().At(0).LogRecords().At(0).EventName() == "ynh.run"
+		}
+		if mr := pmetricotlp.NewExportRequest(); mr.UnmarshalJSON([]byte(line)) == nil && mr.Metrics().MetricCount() > 0 {
+			gotMetric = mr.Metrics().ResourceMetrics().At(0).ScopeMetrics().At(0).Metrics().At(0).Name() == "ynh.runs"
+		}
+	}
+	if !gotSpan || !gotLog || !gotMetric {
+		t.Errorf("span=%v log=%v metric=%v in %v", gotSpan, gotLog, gotMetric, spoolLines(t, dir))
+	}
+	if s := r.Stats(); s.Accepted != 3 || s.Malformed != 0 {
+		t.Errorf("relay stats = %+v", s)
 	}
 }

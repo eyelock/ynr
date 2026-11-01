@@ -53,6 +53,43 @@
 //	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewPeriodicReader(
 //		spoolexporter.NewMetricExporter(w))))
 //
+// # Sending to an operator's endpoint
+//
+// A tool that must also export to the endpoint an operator names in
+// OTEL_EXPORTER_OTLP_* uses an HTTPSender, which posts the same OTLP/JSON
+// over OTLP/HTTP, and the HTTP exporters beside the spool ones. It adds no
+// module: it is net/http and the encoder above.
+//
+//	opts, configured, unsupported := spoolexporter.HTTPOptionsFromEnv(os.Getenv)
+//	if unsupported != "" {
+//		fmt.Fprintln(os.Stderr, "not exporting to OTEL_EXPORTER_OTLP_*:", unsupported)
+//	} else if configured {
+//		h := spoolexporter.NewHTTPSender(opts)
+//		tp := sdktrace.NewTracerProvider(sdktrace.WithBatcher(spoolexporter.NewHTTPTraceExporter(h)))
+//		// NewHTTPLogExporter and NewHTTPMetricExporter likewise.
+//	}
+//
+// It reads OTEL_EXPORTER_OTLP_ENDPOINT (with /v1/traces, /v1/logs and
+// /v1/metrics appended), the per-signal OTEL_EXPORTER_OTLP_{TRACES,LOGS,
+// METRICS}_ENDPOINT (used as given), HEADERS and the per-signal HEADERS (a
+// key=value list, values percent-decoded, the per-signal list winning), and
+// TIMEOUT in milliseconds (the longest of the general and per-signal values
+// applies to every signal). The body is application/json.
+//
+// It does not support, and HTTPOptionsFromEnv reports by name so the caller
+// can print one note and send nothing: a PROTOCOL other than http/json (grpc
+// and http/protobuf), a custom CA or client certificate (the *CERTIFICATE*
+// and *CLIENT_KEY* settings) and compression (COMPRESSION=gzip).
+//
+// An HTTPSender holds the same promise as the Writer. Each export, and so the
+// flush on shutdown, is bounded by the timeout (DefaultHTTPTimeout, 2
+// seconds, unless the operator sets one); there is no retry; a refused
+// connection, a timeout or a non-2xx answer is counted in Stats, never
+// returned. Redirects are not followed. Header values, which carry
+// credentials, appear in no Stats, error or log.
+//
+// # Batching
+//
 // Batching is the SDK's job: register the exporters with the SDK's batch
 // processors, at an export interval of one second or less, so records reach
 // the file at least every second. Call the providers' ForceFlush and then
