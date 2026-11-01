@@ -55,7 +55,27 @@ tool.
     whose whole value is an email address, and any whose value is the user's home folder or an
     absolute path under it, from traces,
     metrics and logs (resource, scope, span, span event and link, data point and exemplar, and log
-    record attributes). They are dropped, not hashed.
+    record attributes). They are dropped, not hashed, with one exception: account ids (below).
+
+    - **Tool details only behind the strip list.** A vendor's tool-detail option (Claude Code's
+      `OTEL_LOG_TOOL_DETAILS`) may be on only when its telemetry reaches the spool through
+      `ynr relay`, never straight to a spool or a backend. It logs what a tool was asked to do, so
+      the relay strips `tool_input` and `tool_parameters` whole, wherever they appear, and keeps
+      the names the option adds that identify a seat and no content: `agent.name`, `agent_type`
+      and `subagent_type`. With the relay not in the path, the option stays off.
+    - **Account ids are kept only as a keyed one-way hash.** `user.id`, `user.account_uuid`,
+      `user.account_id` and `organization.id` are replaced by their HMAC-SHA-256, hex-encoded,
+      under one fixed secret key per Wheelhouse (one per relay), so the same account groups
+      together across records and cannot be read back. The key is configured to the relay from
+      outside the spool (an environment variable or a key file with owner-only permissions),
+      never written to the spool, a log, a span or a metric, and never exported. With no key
+      configured the relay drops these four attributes rather than keep them raw or hash them
+      unkeyed (a plain hash of a guessable id can be reversed by trying ids). Losing the key
+      means the relay can no longer reproduce the hashes: ids already hashed stay as they were
+      and cannot be matched to new ones. Changing the key starts a new set of hashes the same
+      way: records of one account before and after do not join, nothing in the spool can be
+      re-hashed, and a report across the change counts that account twice. Neither exposes an
+      id, so a key change is a deliberate, recorded act, not a repair.
 11. **Records outcomes, not just errors.** A unit of work's span ends with the tool's own outcome
     vocabulary as an attribute (ynf's `converged`, `budget`, `stuck`, …) and its status set from
     it.
@@ -102,9 +122,6 @@ tool.
 - Whether the relay drops a vendor's `user.name`. ADR-002 puts a person's host-qualified handle
   in `user.name`, so a handle there is allowed, but a vendor may put a display name there. The
   relay keeps it for now.
-- Whether account ids (`user.id`, `user.account_id`, `user.account_uuid`) are ids, which are
-  allowed, or identify a person and must go. Claude Code 2.1.316 sends `user.id` on its spans,
-  metrics and logs; the relay keeps account ids for now.
 
 ## History
 
@@ -113,3 +130,8 @@ tool.
   (decided in the review of [ynh #649](https://github.com/eyelock/ynh/pull/649)).
 - 2026-10-31: the relay also drops `user.email`, `user.full_name` and any value that is an email
   address, enforcing rule 10's ban on email addresses and names for vendor CLIs.
+- 2026-11-01: rule 10 allows a vendor's tool details only behind the relay's strip list
+  (`tool_input` and `tool_parameters` dropped whole), and keeps account ids (`user.id`,
+  `user.account_uuid`, `user.account_id`, `organization.id`) only as a keyed HMAC-SHA-256, the key
+  held outside the spool and the ids dropped when there is none. This settles the account-id
+  question from [ynr #87](https://github.com/eyelock/ynr/pull/87).
