@@ -298,6 +298,14 @@ func TestRelay_StripsPathAndHostAttributes(t *testing.T) {
 		m.PutStr("keep.sibling", "/Users/someoneelse/x") // not under home: a prefix match only
 		m.PutStr("keep.tmp", "/tmp/x")
 		m.PutStr("service.name", "codex")
+		m.PutStr("user.email", "nobody@example.com")
+		m.PutStr("user.full_name", "Ann Example")
+		m.PutStr("codex.contact", "someone.else+tag@mail.example.org")
+		people := m.PutEmptySlice("codex.reviewers")
+		people.AppendEmpty().SetStr("octocat")
+		people.AppendEmpty().SetStr("a@example.net")
+		m.PutStr("keep.sentence", "write to a@example.net about it") // not wholly an address
+		m.PutStr("keep.handle", "github.com/octocat")
 	}
 	dir := t.TempDir()
 	r, stop := start(t, Config{Dir: dir, Home: home + "/"})
@@ -350,12 +358,13 @@ func TestRelay_StripsPathAndHostAttributes(t *testing.T) {
 		t.Fatalf("lines = %d, want 3", len(lines))
 	}
 	for i, l := range lines {
-		for _, bad := range []string{`"cwd"`, `"host.name"`, home + "/", `"home.itself"`, `"codex.args"`, `"dir"`} {
+		for _, bad := range []string{`"cwd"`, `"host.name"`, home + "/", `"home.itself"`, `"codex.args"`, `"dir"`,
+			`"user.email"`, `"user.full_name"`, `"codex.contact"`, `"codex.reviewers"`, "Ann Example", "example.com"} {
 			if strings.Contains(l, bad) {
 				t.Errorf("line %d still carries %s: %s", i, bad, l)
 			}
 		}
-		for _, good := range []string{`"keep.sibling"`, `"keep.tmp"`, `"service.name"`, `"model"`} {
+		for _, good := range []string{`"keep.sibling"`, `"keep.tmp"`, `"service.name"`, `"model"`, `"keep.sentence"`, `"keep.handle"`} {
 			if !strings.Contains(l, good) {
 				t.Errorf("line %d lost %s: %s", i, good, l)
 			}
@@ -368,10 +377,30 @@ func TestRelay_StripsPathAndHostAttributes(t *testing.T) {
 	if n := tr.Traces().ResourceSpans().At(0).ScopeSpans().At(0).Spans().At(0).Name(); n != "codex.turn" {
 		t.Errorf("span = %s", n)
 	}
-	// Five attributes and the nested dir from each leaky map: five maps in the trace, three in
+	// Nine attributes and the nested dir from each leaky map: five maps in the trace, three in
 	// the metrics, two in the logs.
-	if s := r.Stats(); s.Stripped != 6*10 || s.Accepted != 3 {
+	if s := r.Stats(); s.Stripped != 10*10 || s.Accepted != 3 {
 		t.Errorf("stats = %+v", s)
+	}
+}
+
+func TestScrubber_Email(t *testing.T) {
+	s := newScrubber("")
+	for v, want := range map[string]bool{
+		"nobody@example.com":            true,
+		"first.last+tag@sub.example.io": true,
+		"a@b":                           false, // no top-level domain
+		"@example.com":                  false,
+		"mail nobody@example.com":       false,
+		"https://nobody@example.com/x":  false,
+		"github.com/octocat":            false,
+		"v1.2.3":                        false,
+	} {
+		m := pcommon.NewMap()
+		m.PutStr("k", v)
+		if got := s.attrs(m) == 1; got != want {
+			t.Errorf("%q: dropped = %v, want %v", v, got, want)
+		}
 	}
 }
 
