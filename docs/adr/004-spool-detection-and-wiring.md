@@ -36,8 +36,11 @@ It is the only contract between a tool and ynr.
   receiver that reads it: a Go module (`github.com/eyelock/ynr/spoolexporter`, released with tags
   `spoolexporter/v*`) and an npm package (`@eyelock/otel-spool-exporter`), both in the
   `spoolexporter/` folder of ynr's repository. Each has its own module, depends only on its
-  language's OpenTelemetry SDK, with no network exporter or gRPC, and nothing else in ynr; they
-  are ordinary OpenTelemetry exporters that know nothing of ynr's roles. The
+  language's OpenTelemetry SDK, and nothing else in ynr; they are ordinary OpenTelemetry
+  exporters that know nothing of ynr's roles. Neither has gRPC or protobuf. (Amended
+  2026-11-01: the Go module also has an OTLP/HTTP JSON exporter, using only `net/http`, so a tool
+  can post the same OTLP/JSON to an operator's `OTEL_EXPORTER_OTLP_*` endpoint beside the spool.
+  The npm package does not, yet.) The
   spool format and both ends of it live in one repository, and every tool uses them (NFR-8).
 
 **Reading.** `ynr serve` reads every writer folder with ynr's own spool receiver, including open

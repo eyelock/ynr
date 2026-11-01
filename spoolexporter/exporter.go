@@ -13,9 +13,10 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// TraceExporter writes spans to a Writer. It never returns an error.
+// TraceExporter sends spans to a sink: a Writer (as spool lines) or an
+// HTTPSender (as OTLP/HTTP requests). It never returns an error.
 type TraceExporter struct {
-	w       *Writer
+	w       sink
 	stopped atomic.Bool
 }
 
@@ -24,29 +25,35 @@ var _ sdktrace.SpanExporter = (*TraceExporter)(nil)
 // NewTraceExporter returns a span exporter writing to w.
 func NewTraceExporter(w *Writer) *TraceExporter { return &TraceExporter{w: w} }
 
-// ExportSpans writes spans as one ExportTraceServiceRequest line.
-func (e *TraceExporter) ExportSpans(_ context.Context, spans []sdktrace.ReadOnlySpan) error {
+// NewHTTPTraceExporter returns a span exporter sending to h, as OTLP/JSON over
+// HTTP. It never returns an error.
+func NewHTTPTraceExporter(h *HTTPSender) *TraceExporter { return &TraceExporter{w: h} }
+
+// ExportSpans sends spans as one ExportTraceServiceRequest: a line in the
+// spool, or a request to the endpoint.
+func (e *TraceExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
 	if len(spans) == 0 {
 		return nil
 	}
 	if e.stopped.Load() {
-		e.w.dropped.Add(int64(len(spans)))
+		e.w.drop(len(spans))
 		return nil
 	}
-	e.w.writeEncoded(traceRequest(spans), len(spans))
+	e.w.send(ctx, signalTraces, traceRequest(spans), len(spans))
 	return nil
 }
 
-// Shutdown stops the exporter. It leaves the Writer open, since the log
+// Shutdown stops the exporter. It leaves the Writer (or HTTPSender) open, since the log
 // exporter may share it; close the Writer once both have shut down.
 func (e *TraceExporter) Shutdown(context.Context) error {
 	e.stopped.Store(true)
 	return nil
 }
 
-// LogExporter writes log records to a Writer. It never returns an error.
+// LogExporter sends log records to a sink: a Writer (as spool lines) or an
+// HTTPSender (as OTLP/HTTP requests). It never returns an error.
 type LogExporter struct {
-	w       *Writer
+	w       sink
 	stopped atomic.Bool
 }
 
@@ -55,32 +62,63 @@ var _ sdklog.Exporter = (*LogExporter)(nil)
 // NewLogExporter returns a log record exporter writing to w.
 func NewLogExporter(w *Writer) *LogExporter { return &LogExporter{w: w} }
 
-// Export writes records as one ExportLogsServiceRequest line.
-func (e *LogExporter) Export(_ context.Context, records []sdklog.Record) error {
+// NewHTTPLogExporter returns a log record exporter sending to h, as OTLP/JSON
+// over HTTP. It never returns an error.
+func NewHTTPLogExporter(h *HTTPSender) *LogExporter { return &LogExporter{w: h} }
+
+// Export sends records as one ExportLogsServiceRequest: a line in the spool,
+// or a request to the endpoint.
+func (e *LogExporter) Export(ctx context.Context, records []sdklog.Record) error {
 	if len(records) == 0 {
 		return nil
 	}
 	if e.stopped.Load() {
-		e.w.dropped.Add(int64(len(records)))
+		e.w.drop(len(records))
 		return nil
 	}
-	e.w.writeEncoded(logsRequest(records), len(records))
+	e.w.send(ctx, signalLogs, logsRequest(records), len(records))
 	return nil
 }
 
-// ForceFlush flushes the Writer's open file to disk, bounded by its
-// SyncTimeout.
+// ForceFlush flushes a Writer's open file to disk, bounded by its
+// SyncTimeout. With an HTTPSender it does nothing, since each export is
+// already sent (or counted as failed) before it returns.
 func (e *LogExporter) ForceFlush(context.Context) error {
-	e.w.Sync()
+	e.w.sync()
 	return nil
 }
 
-// Shutdown stops the exporter. It leaves the Writer open; see
+// Shutdown stops the exporter. It leaves the Writer (or HTTPSender) open; see
 // TraceExporter.Shutdown.
 func (e *LogExporter) Shutdown(context.Context) error {
 	e.stopped.Store(true)
 	return nil
 }
+
+// signal names an OTLP signal, for the sinks that route by it.
+type signal int
+
+const (
+	signalTraces signal = iota
+	signalLogs
+	signalMetrics
+)
+
+// sink is where an exporter sends an encoded export request: a Writer (the
+// spool) or an HTTPSender (an operator's OTLP/HTTP endpoint). Neither fails.
+type sink interface {
+	send(ctx context.Context, sig signal, req any, records int)
+	drop(records int)
+	sync()
+}
+
+func (w *Writer) send(_ context.Context, _ signal, req any, records int) {
+	w.writeEncoded(req, records)
+}
+
+func (w *Writer) drop(records int) { w.dropped.Add(int64(records)) }
+
+func (w *Writer) sync() { w.Sync() }
 
 // writeEncoded marshals one export request and writes it as a line.
 func (w *Writer) writeEncoded(req any, records int) {
