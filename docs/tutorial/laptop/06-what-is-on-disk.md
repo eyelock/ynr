@@ -8,7 +8,7 @@ running.
 In terminal B, press Ctrl-C. The relay flushes what it holds into the spool and says what it did:
 
 ```text
-ynr relay: 2 accepted; refused 0 too large, 0 busy, 0 rate limited, 0 malformed; 0 records dropped by the spool
+ynr relay: 2 accepted; refused 0 too large, 0 busy, 0 rate limited, 0 malformed; 0 attributes stripped; 0 records dropped by the spool
 ```
 
 In terminal A, press Ctrl-C. `ynr serve` stops after a bounded flush and returns you to the prompt. Back in terminal C, check:

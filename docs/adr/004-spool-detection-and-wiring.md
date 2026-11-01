@@ -121,7 +121,9 @@ otherwise its children inherit the environment unchanged.
 **The relay** is for vendor CLIs, which export only over the network. `ynr relay --spool <folder>`
 listens on a random loopback port, so parallel runs on one host never collide, writes what it
 receives into that folder, and enforces a memory limit, a request size limit and a rate limit, since
-the agent can reach it. It accepts OTLP/HTTP, protobuf or JSON, optionally gzipped, and prints its
+the agent can reach it. Before writing, it strips the path and host attributes ADR-006 rule 10
+names, since a vendor cannot always be told not to send them. It accepts OTLP/HTTP, protobuf or
+JSON, optionally gzipped, and prints its
 endpoint as its first line of output (`--format json` adds its pid), which is how whoever started it
 learns where to point the vendor. With `--exit-on-stdin-eof` it also stops when its standard input
 closes, so it ends with the process that started it even if that process is killed outright. When

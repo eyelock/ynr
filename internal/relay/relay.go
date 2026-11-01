@@ -1,6 +1,8 @@
 // Package relay receives OTLP/HTTP from a vendor CLI and writes it into a spool folder (ADR-004).
 // Vendor CLIs export only over the network; the relay turns that into spool files, so their
-// telemetry gets the same reading, stamping and shipping as everything else. The agent can
+// telemetry gets the same reading, stamping and shipping as everything else. Before writing, it
+// strips the attributes that name the machine, the user or a path under their home (ADR-006),
+// since a vendor cannot always be told not to send them. The agent can
 // reach the relay, so it listens on loopback only and bounds request size, memory and rate.
 package relay
 
@@ -50,6 +52,9 @@ type Config struct {
 	Burst             int
 	// Drain bounds how long a stopping relay waits for requests in flight and the final flush.
 	Drain time.Duration
+	// Home is the user's home folder: any attribute whose value is it, or an absolute path under
+	// it, is stripped. Empty takes os.UserHomeDir.
+	Home string
 }
 
 // Stats counts what the relay did with the requests it received.
@@ -59,6 +64,7 @@ type Stats struct {
 	Busy      int64 // refused: over MaxMemory
 	Limited   int64 // refused: over the rate limit
 	Malformed int64 // refused: not decodable OTLP, or an unknown path or content type
+	Stripped  int64 // attributes dropped before the spool: Stripped names, and paths under home
 	Spool     spoolexporter.Stats
 }
 
@@ -69,10 +75,11 @@ type Relay struct {
 	ln       net.Listener
 	srv      *http.Server
 	limiter  *rate.Limiter
+	scrub    *scrubber
 	inflight atomic.Int64
 	active   atomic.Int64 // requests being handled now
 
-	accepted, tooLarge, busy, limited, malformed atomic.Int64
+	accepted, tooLarge, busy, limited, malformed, stripped atomic.Int64
 }
 
 // New validates cfg and starts listening. Serve then handles requests.
@@ -104,6 +111,9 @@ func New(cfg Config) (*Relay, error) {
 	if cfg.Drain <= 0 {
 		cfg.Drain = DefaultDrain
 	}
+	if cfg.Home == "" {
+		cfg.Home, _ = os.UserHomeDir()
+	}
 	if err := loopback(cfg.Listen); err != nil {
 		return nil, err
 	}
@@ -125,11 +135,12 @@ func New(cfg Config) (*Relay, error) {
 		}),
 		ln:      ln,
 		limiter: rate.NewLimiter(rate.Limit(cfg.Rate), cfg.Burst),
+		scrub:   newScrubber(cfg.Home),
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/traces", r.handle(decodeTraces))
-	mux.HandleFunc("/v1/metrics", r.handle(decodeMetrics))
-	mux.HandleFunc("/v1/logs", r.handle(decodeLogs))
+	mux.HandleFunc("/v1/traces", r.handle(r.decodeTraces))
+	mux.HandleFunc("/v1/metrics", r.handle(r.decodeMetrics))
+	mux.HandleFunc("/v1/logs", r.handle(r.decodeLogs))
 	r.srv = &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
@@ -161,7 +172,8 @@ func (r *Relay) Endpoint() string { return "http://" + r.ln.Addr().String() }
 func (r *Relay) Stats() Stats {
 	return Stats{
 		Accepted: r.accepted.Load(), TooLarge: r.tooLarge.Load(), Busy: r.busy.Load(),
-		Limited: r.limited.Load(), Malformed: r.malformed.Load(), Spool: r.w.Stats(),
+		Limited: r.limited.Load(), Malformed: r.malformed.Load(), Stripped: r.stripped.Load(),
+		Spool: r.w.Stats(),
 	}
 }
 
@@ -194,32 +206,35 @@ func (r *Relay) Serve(ctx context.Context) error {
 	return err
 }
 
-// decoder turns an OTLP request body into OTLP JSON and its record count.
+// decoder turns an OTLP request body into scrubbed OTLP JSON and its record count.
 type decoder func(body []byte, json bool) (out []byte, records int, err error)
 
-func decodeTraces(b []byte, js bool) ([]byte, int, error) {
+func (r *Relay) decodeTraces(b []byte, js bool) ([]byte, int, error) {
 	req := ptraceotlp.NewExportRequest()
 	if err := unmarshal(req.UnmarshalJSON, req.UnmarshalProto, b, js); err != nil {
 		return nil, 0, err
 	}
+	r.stripped.Add(int64(r.scrub.traces(req.Traces())))
 	out, err := req.MarshalJSON()
 	return out, req.Traces().SpanCount(), err
 }
 
-func decodeMetrics(b []byte, js bool) ([]byte, int, error) {
+func (r *Relay) decodeMetrics(b []byte, js bool) ([]byte, int, error) {
 	req := pmetricotlp.NewExportRequest()
 	if err := unmarshal(req.UnmarshalJSON, req.UnmarshalProto, b, js); err != nil {
 		return nil, 0, err
 	}
+	r.stripped.Add(int64(r.scrub.metrics(req.Metrics())))
 	out, err := req.MarshalJSON()
 	return out, req.Metrics().DataPointCount(), err
 }
 
-func decodeLogs(b []byte, js bool) ([]byte, int, error) {
+func (r *Relay) decodeLogs(b []byte, js bool) ([]byte, int, error) {
 	req := plogotlp.NewExportRequest()
 	if err := unmarshal(req.UnmarshalJSON, req.UnmarshalProto, b, js); err != nil {
 		return nil, 0, err
 	}
+	r.stripped.Add(int64(r.scrub.logs(req.Logs())))
 	out, err := req.MarshalJSON()
 	return out, req.Logs().LogRecordCount(), err
 }

@@ -428,8 +428,8 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	}
 	err = r.Serve(ctx)
 	s := r.Stats()
-	_, _ = fmt.Fprintf(stderr, "ynr relay: %d accepted; refused %d too large, %d busy, %d rate limited, %d malformed; %d records dropped by the spool\n",
-		s.Accepted, s.TooLarge, s.Busy, s.Limited, s.Malformed, s.Spool.Dropped)
+	_, _ = fmt.Fprintf(stderr, "ynr relay: %d accepted; refused %d too large, %d busy, %d rate limited, %d malformed; %d attributes stripped; %d records dropped by the spool\n",
+		s.Accepted, s.TooLarge, s.Busy, s.Limited, s.Malformed, s.Stripped, s.Spool.Dropped)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
 		return ExitAdapter

@@ -145,7 +145,7 @@ ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
 
 Prints its OTLP/HTTP endpoint as its first line of output, then runs until stopped (Ctrl-C,
 `SIGTERM`, or with `--exit-on-stdin-eof` its standard input closing), flushing what it received. On
-exit it prints a line on stderr counting what it accepted and refused.
+exit it prints a line on stderr counting what it accepted, refused and stripped.
 
 | Flag | Default | Meaning |
 |---|---|---|
@@ -159,6 +159,22 @@ exit it prints a line on stderr counting what it accepted and refused.
 
 It accepts OTLP/HTTP, protobuf or JSON, optionally gzipped, on `/v1/traces`, `/v1/metrics` and
 `/v1/logs`.
+
+Before writing a request to the spool, it strips the attributes that name a person, the machine,
+the user or a path on it (ADR-006, rule 10), wherever they appear in traces, metrics and logs: on the resource,
+the scope, a span, a span event or link, a data point or exemplar, or a log record. It drops:
+
+- `user.email`, `user.full_name`, `cwd`, `host.name`, `host.id`, `host.ip`, `host.mac`, `process.owner`, `process.command`,
+  `process.command_line`, `process.command_args` and `process.executable.path`;
+- any attribute whose whole value is an email address (a sentence or URL mentioning one is kept);
+- any attribute whose value is the user's home folder or an absolute path under it.
+
+A list holding such a value is dropped whole; inside a map value, just the offending keys go.
+`user.name`, which ADR-002 uses for a person's host-qualified handle, and account ids such as
+`user.id` are kept until ADR-006 settles them.
+
+They are dropped, not hashed. The count is the `attributes stripped` figure in the exit line. Only
+attributes are scrubbed, not a log record's body or a span's name.
 
 ### ynr telemetry registry
 
