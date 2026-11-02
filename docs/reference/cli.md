@@ -170,8 +170,9 @@ the scope, a span, a span event or link, a data point or exemplar, or a log reco
 - any attribute whose value is the user's home folder or an absolute path under it.
 
 A list holding such a value is dropped whole; inside a map value, just the offending keys go.
-`user.name`, which ADR-002 uses for a person's host-qualified handle, and account ids such as
-`user.id` are kept until ADR-006 settles them.
+`user.name`, which ADR-002 uses for a person's host-qualified handle, is kept until ADR-006
+settles it. Account ids such as `user.id` are kept raw until the relay hashes them (ADR-006
+rule 10).
 
 They are dropped, not hashed. The count is the `attributes stripped` figure in the exit line. Only
 attributes are scrubbed, not a log record's body or a span's name.
