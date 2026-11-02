@@ -46,7 +46,7 @@ tool.
     memory bodies. Ids, enums, counts, durations and hashes only. People appear only by their
     host-qualified handle, never by name or email (ADR-002). It redacts secrets from string values
     at the source, before anything reaches the spool, and runs vendor CLIs with their content
-    options off. No paths and no host names either: a tool never exports its working directory,
+    options off (the one exception is the tool-details option, below). No paths and no host names either: a tool never exports its working directory,
     the machine's name, or a path under the user's home, which names their account. Vendor CLIs
     cannot always be told this (Codex sends `cwd` and `host.name` and has no setting to stop it,
     and its logs carry `user.email`), so `ynr relay` enforces it for every vendor: before anything
@@ -64,13 +64,17 @@ tool.
       the names the option adds that identify a seat and no content: `agent.name`, `agent_type`
       and `subagent_type`. With the relay not in the path, the option stays off.
     - **Account ids are kept only as a keyed one-way hash.** `user.id`, `user.account_uuid`,
-      `user.account_id` and `organization.id` are replaced by their HMAC-SHA-256, hex-encoded,
-      under one fixed secret key per Wheelhouse (one per relay), so the same account groups
-      together across records and cannot be read back. The key is configured to the relay from
-      outside the spool (an environment variable or a key file with owner-only permissions),
-      never written to the spool, a log, a span or a metric, and never exported. With no key
-      configured the relay drops these four attributes rather than keep them raw or hash them
-      unkeyed (a plain hash of a guessable id can be reversed by trying ids). Losing the key
+      `user.account_id` and `organization.id` are replaced by their HMAC-SHA-256 under
+      one fixed secret key per Wheelhouse, held by the Wheelhouse's standing relay, so the same
+      account groups together across records and cannot be read back. The value is the hex HMAC
+      together with a short public key id derived from the key, so a reader can see which key
+      produced it without learning the key. The key is a key file only, never the key's value in
+      an environment variable: the relay is given the file by flag, or by an environment variable
+      that names the file. The file must have mode 0600 and must not lie under the spool root,
+      and the relay refuses one that does or that group or others can read. The key is never
+      written to the spool, a log, a span or a metric, and never exported. With no key
+      configured (a per-run relay, such as that of `ynh agent run` in ADR-004, has none) the
+      relay drops these four attributes rather than keep them raw or hash them unkeyed (a plain hash of a guessable id can be reversed by trying ids). Losing the key
       means the relay can no longer reproduce the hashes: ids already hashed stay as they were
       and cannot be matched to new ones. Changing the key starts a new set of hashes the same
       way: records of one account before and after do not join, nothing in the spool can be
