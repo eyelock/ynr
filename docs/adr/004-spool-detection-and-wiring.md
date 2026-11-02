@@ -155,9 +155,19 @@ so it gets no `runs/<run id>/` folder, and not a factory or a hosted service, so
 records `ynr.provenance` of `local`, stamped by `ynr serve` from the folder and overwriting
 anything the record says, as for every writer. That is the honest label: a record from a seat's
 vendor process, relayed over loopback, is no stronger a claim than "something on this laptop wrote
-it". Several Wheelhouses on one laptop share that folder and are told apart by the resource
-attributes on their records, never by provenance. A Wheelhouse that wants a separate folder starts
-its relay with `--spool` pointing at one; it then needs its own `ynr serve` on that root.
+it". Several Wheelhouses on one laptop share that folder and are told apart by the run label
+`ynh.label.wheelhouse`, never by provenance and never by a folder per Wheelhouse. A run label
+`wheelhouse:<name>`, which every harness in a Wheelhouse carries, becomes that resource attribute
+(decided 2026-11-02: general ynh labels, one attribute per key; the label rule is ADR-006 rule 10).
+`ynh run` appends it to the vendor's `OTEL_RESOURCE_ATTRIBUTES` and passes it to child processes
+through `YNH_LABELS`, so the desk's subagents carry it too, and `ynr query --label wheelhouse:<name>`
+selects one Wheelhouse. This ADR states the design; the build is ynw-17g.14 to ynw-17g.19.
+
+**The Wheelhouse's standing relay holds the HMAC key.** ADR-006 rule 10 hashes account identifiers
+(`user.id`, `user.account_uuid`, `user.account_id`, `organization.id`) with a key, so the same
+account hashes alike across records without the id being recoverable. The Wheelhouse's standing
+relay is the one that holds that key. A per-run relay, such as that of `ynh agent run`, has none, so
+it drops those ids instead of hashing them.
 
 **`ynh run` wires the vendor itself when a relay endpoint is configured.** `ynh run` still ends in
 an exec of the vendor CLI, so ynh has no process to own a span (see Alternatives). It can still set
@@ -169,9 +179,12 @@ the same way as the table above, `CLAUDE_CODE_ENABLE_TELEMETRY=1`,
 `OTEL_LOGS_EXPORTER` set to `otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`,
 `OTEL_EXPORTER_OTLP_ENDPOINT` set to that endpoint, and `OTEL_LOG_TOOL_DETAILS=1`, without which
 Claude Code does not name its subagents. Prompt logging is never turned on. It appends to
-`OTEL_RESOURCE_ATTRIBUTES` the harness name and version, the focus and the profile, under ynh's
-registry names (ADR-007), percent-encoded and without spaces, since one space makes Claude Code
-drop every key. A seat that `ynh run` launched is therefore named by those resource attributes; a
+`OTEL_RESOURCE_ATTRIBUTES` the harness name and version, the focus and the profile, and the run
+labels (`ynh.label.<key>`, so `ynh.label.wheelhouse`), under ynh's registry names (ADR-007),
+percent-encoded and without spaces, since one space makes Claude Code drop every key. This wiring,
+the environment list, the space behaviour and the subagent names were verified with Claude Code
+2.1.316, as the per-run table above is for 2.1.289. A seat that `ynh run` launched is therefore
+named by those resource attributes; a
 subagent of the desk is named by Claude Code's own `agent.name` and subagent type, which
 `OTEL_LOG_TOOL_DETAILS=1` provides. There is no `TRACEPARENT` and no `ynh run` span: interactive
 Claude Code ignores an inbound `TRACEPARENT`, so the records are Claude Code's own and are read as
@@ -241,3 +254,6 @@ turns nothing on.
 
 - 2026-10-05: drafted.
 - 2026-11-01: a standing relay per Wheelhouse, and `ynh run` wiring the vendor's own telemetry.
+- 2026-11-02: Wheelhouses sharing `local/` are told apart by the `ynh.label.wheelhouse` run label;
+  the `ynh run` wiring is verified on Claude Code 2.1.316; the standing relay holds the HMAC key and
+  a per-run relay drops the account ids.

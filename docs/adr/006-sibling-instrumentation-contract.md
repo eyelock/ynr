@@ -103,7 +103,7 @@ tool.
 
 | Tool | Issue | Scope |
 |---|---|---|
-| ynh | [eyelock/ynh#514](https://github.com/eyelock/ynh/issues/514) | `ynh agent run` only: spool output, joining ynf's trace, the relay setting and vendor configuration, the slim `ynr` in the base image, conformance against the stub vendor |
+| ynh | [eyelock/ynh#514](https://github.com/eyelock/ynh/issues/514) | `ynh agent run`: spool output, joining ynf's trace, the relay setting and vendor configuration, the slim `ynr` in the base image, conformance against the stub vendor; and `ynh run` wiring the vendor's telemetry to a relay endpoint (ADR-004) |
 | ynf | [eyelock/ynf#86](https://github.com/eyelock/ynf/issues/86) | step traces linked through intake spans, the CloudEvents mirror, lane ids, run folders, quotas and manifests, starting `ynr serve` when configured, the full-chain conformance check |
 | ynm | [eyelock/ynm#62](https://github.com/eyelock/ynm/issues/62) | an `otel` audit provider, server spans, trace context in, spool output, `services/ynm/` when hosted, a lazily loaded SDK |
 
