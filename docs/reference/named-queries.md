@@ -5,7 +5,7 @@ store's records. They need the full build. The list below is the catalogue in
 `internal/query/query.go`.
 
 ```
-ynr query <name> [argument] [--since <window>] [--until <time>] [--lane <id>] [--label <key:value>]... [--format text|json]
+ynr query <name> [argument] [--since <window>] [--until <time>] [--lane <id>] [--label key:value]... [--format text|json]
 ```
 
 A **run** is a span named `ynh.run`: one `ynh agent run`, whether a factory or a person started it.

@@ -230,7 +230,7 @@ Follows until Ctrl-C. It only watches: `ynr serve` still ships everything. Times
 ### ynr query
 
 ```
-ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>] [--label <key:value>]...
+ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>] [--label key:value]...
            [--format text|json] [--socket <path>] [--spool <root>] [--erase <file>]]
 ```
 
