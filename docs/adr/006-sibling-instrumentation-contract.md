@@ -88,14 +88,14 @@ tool.
         starts with `/` or `~` nor contains the user's home folder;
       - a run has at most 16 labels;
       - a label never holds a person's name or email, a host name, a secret, or a run or item id.
-        It is a short id for a ticket, a project or a batch, such as `ynw-17g.14` or `#412`.
+        It is a short id for a Wheelhouse, a project or a batch: the key `wheelhouse` with the
+        value `ynw`, for instance.
 
       The tool refuses an invalid label at the source, before anything reaches the spool; it does
       not export a sanitised version. This holds for every vendor the tool runs, since the label
       belongs to the run and not to a vendor's own telemetry. Resource attributes reach metrics,
       so rule 8's cardinality limit applies: a tool declares the cap on distinct label values in
-      its registry (ADR-008), and a label that would exceed it stays off metrics. The relay's
-      strip list (above) is a second line of defence, not a substitute for the tool's check.
+      its registry (ADR-008).
 11. **Records outcomes, not just errors.** A unit of work's span ends with the tool's own outcome
     vocabulary as an attribute (ynf's `converged`, `budget`, `stuck`, …) and its status set from
     it.
