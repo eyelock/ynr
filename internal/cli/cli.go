@@ -59,7 +59,7 @@ Usage:
   ynr conformance [--file .ynr/conformance.yaml] [--format text|json] [--timeout 60s]
             [--flush-limit 2s] [--keep]
   ynr tail [--spool <root>] [--service <name>] [--item <key>] [--from-start] [--format text|json]
-  ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>]
+  ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>] [--label k:v]...
             [--format text|json] [--socket <path>]]
 
 ynr central reads a shared store, such as a bucket the collectors ship to: it keeps the last 6

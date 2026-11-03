@@ -13,12 +13,12 @@ ynr query
 Expected:
 
 ```text
-Named queries (ynr query <name> [argument] [--since 7d] [--until <time>] [--lane <id>] [--format text|json]):
+Named queries (ynr query <name> [argument] [--since 7d] [--until <time>] [--lane <id>] [--label k:v]... [--format text|json]):
   cost              what runs cost and the tokens they used, by model, as the runners reported it (default --since 7d)
   item <item key>   what happened to one work item, by its key: its steps, runs and events in order (default --since 7d)
   items             the work items seen lately, most recent first, with their last outcome (default --since 7d)
-  recent            the latest runs, newest first, with their trace ids (--lane to pick one) (default --since 1d)
-  runs              runs by outcome for each lane (--lane to pick one) (default --since 1d)
+  recent            the latest runs, newest first, with their trace ids (--lane or --label to pick) (default --since 1d)
+  runs              runs by outcome for each lane (--lane or --label to pick) (default --since 1d)
   trace <trace id>  one trace's spans as a tree, by trace id (default --since 7d)
 ```
 

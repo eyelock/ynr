@@ -26,6 +26,7 @@ type Doc struct {
 	Query   string           `json:"query"`
 	Arg     string           `json:"arg,omitempty"`
 	Lane    string           `json:"lane,omitempty"`
+	Labels  []string         `json:"labels,omitempty"`
 	Since   time.Time        `json:"since"`
 	Until   time.Time        `json:"until"`
 	Columns []string         `json:"columns"`
@@ -35,13 +36,15 @@ type Doc struct {
 // Raw are a query's inputs as a person or a URL gives them.
 type Raw struct {
 	Arg, Since, Until, Lane string
+	// Labels are --label values, each key:value; every one must match.
+	Labels []string
 }
 
 // Resolve turns raw inputs into params, measuring durations back from now and defaulting the
 // window to the query's own.
 func (q *Query) Resolve(raw Raw, now time.Time) (Params, error) {
 	now = now.UTC()
-	p := Params{Arg: raw.Arg, Lane: raw.Lane, Since: now.Add(-q.Since), Until: now}
+	p := Params{Arg: raw.Arg, Lane: raw.Lane, Labels: raw.Labels, Since: now.Add(-q.Since), Until: now}
 	var err error
 	if raw.Since != "" {
 		if p.Since, err = ParseWhen(raw.Since, now); err != nil {
@@ -81,10 +84,11 @@ func EncodeJSON(w io.Writer, q *Query, p Params, res *Result) error {
 		Query   string    `json:"query"`
 		Arg     string    `json:"arg,omitempty"`
 		Lane    string    `json:"lane,omitempty"`
+		Labels  []string  `json:"labels,omitempty"`
 		Since   time.Time `json:"since"`
 		Until   time.Time `json:"until"`
 		Columns []string  `json:"columns"`
-	}{q.Name, p.Arg, p.Lane, p.Since, p.Until, res.Columns})
+	}{q.Name, p.Arg, p.Lane, p.Labels, p.Since, p.Until, res.Columns})
 	if err != nil {
 		return err
 	}
@@ -138,7 +142,7 @@ func DecodeJSON(r io.Reader) (*Doc, *Result, error) {
 // Handler serves the named queries as JSON (ADR-005):
 //
 //	GET /api/queries                                         the named queries
-//	GET /api/query/<name>?arg=&since=&until=&lane=           one query's answer
+//	GET /api/query/<name>?arg=&since=&until=&lane=&label=k:v          one query's answer
 func Handler(r Runner, now func() time.Time) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/queries", func(w http.ResponseWriter, _ *http.Request) {
@@ -163,7 +167,7 @@ func Handler(r Runner, now func() time.Time) http.Handler {
 			return
 		}
 		v := req.URL.Query()
-		p, err := q.Resolve(Raw{Arg: v.Get("arg"), Since: v.Get("since"), Until: v.Get("until"), Lane: v.Get("lane")}, now())
+		p, err := q.Resolve(Raw{Arg: v.Get("arg"), Since: v.Get("since"), Until: v.Get("until"), Lane: v.Get("lane"), Labels: v["label"]}, now())
 		if err != nil {
 			fail(w, http.StatusBadRequest, err)
 			return
@@ -207,6 +211,9 @@ func Ask(ctx context.Context, socket, name string, raw Raw) (*Doc, *Result, erro
 		if s != "" {
 			v.Set(k, s)
 		}
+	}
+	for _, l := range raw.Labels {
+		v.Add("label", l)
 	}
 	u := "http://ynr/api/query/" + url.PathEscape(name) + "?" + v.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
