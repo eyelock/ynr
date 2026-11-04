@@ -80,6 +80,22 @@ tool.
       way: records of one account before and after do not join, nothing in the spool can be
       re-hashed, and a report across the change counts that account twice. Neither exposes an
       id, so a key change is a deliberate, recorded act, not a repair.
+    - **Run labels are ids the user chose, never content.** A tool that lets a user attach labels
+      to a run exports each as the resource attribute `<tool prefix>.label.<key>` (ynh's are
+      `ynh.label.<key>`), and only when it meets these limits:
+      - a key matches `^[a-z][a-z0-9_.-]{0,31}$`;
+      - a value matches `^[A-Za-z0-9._/#-]{1,64}$`, so it has no spaces and no `@`, and it neither
+        starts with `/` or `~` nor contains the user's home folder;
+      - a run has at most 16 labels;
+      - a label never holds a person's name or email, a host name, a secret, or a run or item id.
+        It is a short id for a Wheelhouse, a project or a batch: the key `wheelhouse` with the
+        value `ynw`, for instance.
+
+      The tool refuses an invalid label at the source, before anything reaches the spool; it does
+      not export a sanitised version. This holds for every vendor the tool runs, since the label
+      belongs to the run and not to a vendor's own telemetry. Resource attributes reach metrics,
+      so rule 8's cardinality limit applies: a tool declares the cap on distinct label values in
+      its registry (ADR-008).
 11. **Records outcomes, not just errors.** A unit of work's span ends with the tool's own outcome
     vocabulary as an attribute (ynf's `converged`, `budget`, `stuck`, …) and its status set from
     it.
@@ -139,3 +155,5 @@ tool.
   `user.account_uuid`, `user.account_id`, `organization.id`) only as a keyed HMAC-SHA-256, the key
   held outside the spool and the ids dropped when there is none. This settles the account-id
   question from [ynr #87](https://github.com/eyelock/ynr/pull/87).
+- 2026-11-03: rule 10 says what a run label may be (a user-chosen id, with key and value patterns, at
+  most 16 per run, refused at the source, rule 8's cardinality limit applying), for any vendor.
