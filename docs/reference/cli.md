@@ -230,7 +230,7 @@ Follows until Ctrl-C. It only watches: `ynr serve` still ships everything. Times
 ### ynr query
 
 ```
-ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>]
+ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>] [--label key:value]...
            [--format text|json] [--socket <path>] [--spool <root>] [--erase <file>]]
 ```
 
@@ -242,6 +242,7 @@ before or after the flags.
 | `--since` | the query's own window | The start of the window: a duration back from now (`24h`, `7d`) or an RFC 3339 time. |
 | `--until` | now | The end of the window, the same way. |
 | `--lane` | all | Only this lane's records, where the query takes one. |
+| `--label` | none | Only runs carrying this [run label](../adr/006-sibling-instrumentation-contract.md), written `key:value` (`wheelhouse:ynw`). Repeat it to require several: every one must match. A label that breaks rule 10's grammar is refused (exit 2). Refused too for `runs` and `cost` over a window longer than 7 days, which read rollups that keep no labels. Applies to `runs`, `recent`, `items`, `item` and `cost`; `trace` ignores it. |
 | `--format` | `text` | `text` or `json`: `query`, `since`, `until`, `columns` and `rows`. |
 | `--spool` | the spool root | The spool root of the `ynr serve` to ask. `YNR_SPOOL_ROOT`. |
 | `--socket` | none | The Unix socket of the `ynr central` to ask. Without it, `ynr query` asks the `ynr central` whose state folder is `YNR_CENTRAL_STATE` (default `$XDG_STATE_HOME/ynr/central`), at the same default socket central derives, however long that folder's path. `YNR_CENTRAL_SOCKET`. |

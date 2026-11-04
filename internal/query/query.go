@@ -34,7 +34,7 @@ type Query struct {
 	// views too, computed from their records.
 	RollupSQL string
 	// SQL is DuckDB SQL over spans, logs and metric_points (batches.sql), with the
-	// named parameters $since and $until (timestamps), $arg and $lane (text).
+	// named parameters $since and $until (timestamps), $arg, $lane and $labels (text; match $labels with labels_match).
 	SQL string
 }
 
@@ -43,6 +43,8 @@ type Params struct {
 	Arg          string
 	Since, Until time.Time
 	Lane         string
+	// Labels are the run labels every row must carry, each as key:value (ADR-006 rule 10).
+	Labels []string
 }
 
 // Result is a query's rows, in its columns' order. Values are strings, numbers, booleans, times
@@ -107,6 +109,13 @@ func (q *Query) Check(p Params) error {
 		return fmt.Errorf("%s takes no argument", q.Name)
 	case !p.Since.Before(p.Until):
 		return errors.New("--since must be before --until")
+	case len(p.Labels) > 0 && q.RollupSQL != "" && p.Until.Sub(p.Since) > LongRange:
+		return fmt.Errorf("--label cannot filter %s over more than %s: the rollups it reads keep no labels; narrow the window", q.Name, LongRange)
+	}
+	for _, l := range p.Labels {
+		if err := CheckLabel(l); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -116,7 +125,7 @@ func (q *Query) Check(p Params) error {
 var Catalogue = []Query{
 	{
 		Name:    "runs",
-		Help:    "runs by outcome for each lane (--lane to pick one)",
+		Help:    "runs by outcome for each lane (--lane or --label to pick)",
 		Since:   24 * time.Hour,
 		Signals: []string{store.Traces},
 		SQL: `
@@ -124,7 +133,7 @@ SELECT coalesce(lane, '(by hand)') AS lane, coalesce(outcome, '(none)') AS outco
        count(*) AS runs, round(median(duration_ms) / 1000, 1) AS median_s,
        round(sum(cost_usd), 4) AS cost_usd, max(time) AS last
 FROM spans
-WHERE name = 'ynh.run' AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane)
+WHERE name = 'ynh.run' AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane) AND labels_match(labels, $labels)
 GROUP BY ALL
 ORDER BY lane, runs DESC, outcome`,
 		RollupSQL: `
@@ -137,14 +146,14 @@ ORDER BY lane, runs DESC, outcome`,
 	},
 	{
 		Name:    "recent",
-		Help:    "the latest runs, newest first, with their trace ids (--lane to pick one)",
+		Help:    "the latest runs, newest first, with their trace ids (--lane or --label to pick)",
 		Since:   24 * time.Hour,
 		Signals: []string{store.Traces},
 		SQL: `
 SELECT time, coalesce(lane, '(by hand)') AS lane, item_key AS item, actor, coalesce(outcome, '(none)') AS outcome,
        model, round(duration_ms / 1000, 1) AS duration_s, round(cost_usd, 4) AS cost_usd, trace_id
 FROM spans
-WHERE name = 'ynh.run' AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane)
+WHERE name = 'ynh.run' AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane) AND labels_match(labels, $labels)
 ORDER BY time DESC
 LIMIT 200`,
 	},
@@ -158,7 +167,7 @@ SELECT item_key AS item, any_value(lane) AS lane, min(time) AS first_seen, max(t
        count(DISTINCT step_id) AS steps, count(DISTINCT trace_id) AS traces,
        arg_max(outcome, time) FILTER (WHERE outcome IS NOT NULL) AS last_outcome
 FROM spans
-WHERE item_key IS NOT NULL AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane)
+WHERE item_key IS NOT NULL AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane) AND labels_match(labels, $labels)
 GROUP BY item_key
 ORDER BY last_seen DESC
 LIMIT 200`,
@@ -174,11 +183,11 @@ LIMIT 200`,
 SELECT time, 'span' AS record, name, service, actor, outcome, round(duration_ms, 1) AS duration_ms,
        step_id, trace_id, span_id
 FROM spans
-WHERE item_key = $arg AND time >= $since AND time < $until
+WHERE item_key = $arg AND time >= $since AND time < $until AND labels_match(labels, $labels)
 UNION ALL
 SELECT time, 'event', event, service, actor, outcome, NULL, step_id, trace_id, span_id
 FROM logs
-WHERE item_key = $arg AND event IS NOT NULL AND time >= $since AND time < $until
+WHERE item_key = $arg AND event IS NOT NULL AND time >= $since AND time < $until AND labels_match(labels, $labels)
 ORDER BY time, record DESC, name`,
 	},
 	{
@@ -214,7 +223,7 @@ SELECT coalesce(model, '(unknown)') AS model, count(*) AS runs,
        sum(TRY_CAST(attr(attributes, 'gen_ai.usage.input_tokens') AS BIGINT)) AS input_tokens,
        sum(TRY_CAST(attr(attributes, 'gen_ai.usage.output_tokens') AS BIGINT)) AS output_tokens
 FROM spans
-WHERE name = 'ynh.run' AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane)
+WHERE name = 'ynh.run' AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane) AND labels_match(labels, $labels)
 GROUP BY ALL
 ORDER BY cost_usd DESC NULLS LAST, model`,
 		RollupSQL: `

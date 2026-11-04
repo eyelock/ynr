@@ -46,6 +46,8 @@ func queryCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	since := fs.String("since", "", "start of the window: a duration back from now (24h, 7d) or a time (RFC 3339); default "+days(q.Since))
 	until := fs.String("until", "", "end of the window, the same way; default now")
 	lane := fs.String("lane", "", "only this lane's records, where the query takes one")
+	var labels labelFlag
+	fs.Var(&labels, "label", "only runs carrying this run label, written key:value; repeat it to require several")
 	format := fs.String("format", "text", "text or json")
 	erase := fs.String("erase", env("YNR_ERASE", ""), "a file of handles to mask, for a direct read (YNR_ERASE)")
 	if err := fs.Parse(rest); err != nil {
@@ -66,7 +68,7 @@ func queryCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		_, _ = fmt.Fprintln(stderr, "ynr: --format must be text or json")
 		return ExitUsage
 	}
-	raw := query.Raw{Arg: arg, Since: *since, Until: *until, Lane: *lane}
+	raw := query.Raw{Arg: arg, Since: *since, Until: *until, Lane: *lane, Labels: labels}
 	p, err := q.Resolve(raw, now())
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
@@ -83,7 +85,7 @@ func queryCmd(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			var se *query.ServerError
 			switch {
 			case err == nil:
-				return write(stdout, stderr, *format, q, query.Params{Arg: doc.Arg, Lane: doc.Lane, Since: doc.Since, Until: doc.Until}, res)
+				return write(stdout, stderr, *format, q, query.Params{Arg: doc.Arg, Lane: doc.Lane, Labels: doc.Labels, Since: doc.Since, Until: doc.Until}, res)
 			case errors.As(err, &se) && se.Status == http.StatusBadRequest:
 				_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
 				return ExitUsage
@@ -152,7 +154,7 @@ func write(stdout, stderr io.Writer, format string, q *query.Query, p query.Para
 }
 
 func listQueries(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "Named queries (ynr query <name> [argument] [--since 7d] [--until <time>] [--lane <id>] [--format text|json]):")
+	_, _ = fmt.Fprintln(w, "Named queries (ynr query <name> [argument] [--since 7d] [--until <time>] [--lane <id>] [--label key:value]... [--format text|json]):")
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, n := range query.Names() {
 		q, _ := query.Lookup(n)
@@ -242,3 +244,9 @@ func text(v any) string {
 	}
 	return fmt.Sprint(v)
 }
+
+// labelFlag is a repeatable --label.
+type labelFlag []string
+
+func (l *labelFlag) String() string     { return strings.Join(*l, ",") }
+func (l *labelFlag) Set(v string) error { *l = append(*l, v); return nil }
