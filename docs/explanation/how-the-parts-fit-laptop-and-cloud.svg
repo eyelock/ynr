@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 640" width="520" height="640" role="img" aria-labelledby="title desc">
+  <title id="title">One design for a laptop and the cloud</title>
+  <desc id="desc">On a laptop, the full build of ynr serve is collector and reader in one process, and ships to a folder. In the cloud, many slim ynr serve collectors, one for each runner pool or host, ship to an S3 bucket, and ynr central, a full build, reads it. The code is the same; three ports differ. Object store: a folder on a laptop, S3 and S3-compatible servers in the cloud. Change feed, how the reader learns new files landed: listing the folder, or listing the current hour's prefix. Write identity, so a collector writes only its own segment: file permissions, or one IAM role for each collector.</desc>
+
+  <style>
+    svg { --bg:#ffffff; --box:#f4f6f9; --chip:#ffffff; --line:#8a94a6; --text:#1f2328; --muted:#57606a; --accent:#0066cc; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg:#0d1117; --box:#161b22; --chip:#0d1117; --line:#6e7681; --text:#e6edf3; --muted:#9198a1; --accent:#58a6ff; }
+    }
+    .bg { fill: var(--bg); }
+    .box { fill: var(--box); stroke: var(--line); stroke-width: 1.2; }
+    .chip { fill: var(--chip); stroke: var(--line); stroke-width: 1; }
+    .dash { fill: var(--box); stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 5 4; }
+    .band { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+    .rule { stroke: var(--line); stroke-width: 1; }
+    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: var(--text); }
+    .t { font-size: 16px; font-weight: 600; }
+    .b { font-size: 15px; }
+    .m { font-size: 14px; fill: var(--muted); }
+    .c { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13.5px; }
+    .h { font-size: 16px; font-weight: 600; fill: var(--accent); }
+    .arrow { stroke: var(--text); stroke-width: 1.6; fill: none; marker-end: url(#tip); }
+    .arrow2 { stroke: var(--text); stroke-width: 1.6; fill: none; marker-end: url(#tip); marker-start: url(#tail); }
+    .darrow { stroke: var(--muted); stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; marker-end: url(#tipm); }
+    #tip path { fill: var(--text); } #tail path { fill: var(--text); } #tipm path { fill: var(--muted); }
+  </style>
+  <defs>
+    <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="tail" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="tipm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="520" height="640" rx="8"/>
+  <text class="h" x="137.5" y="40" text-anchor="middle">On a laptop</text>
+  <text class="h" x="382.5" y="40" text-anchor="middle">In the cloud</text>
+  <rect class="box" x="20" y="60" width="235" height="90" rx="6"/>
+  <text class="t" x="32" y="86">ynr serve, full build</text>
+  <text class="m" x="32" y="106">collector and reader</text>
+  <text class="m" x="32" y="126">in one process</text>
+  <path class="arrow2" d="M137.5,150 L137.5,188"/>
+  <rect class="box" x="20" y="190" width="235" height="64" rx="6"/>
+  <text class="t" x="32" y="216">a folder</text>
+  <text class="m" x="32" y="236">file://</text>
+  <rect class="box" x="265" y="60" width="235" height="90" rx="6"/>
+  <text class="t" x="277" y="86">ynr serve, slim build</text>
+  <text class="m" x="277" y="106">many: one for each runner</text>
+  <text class="m" x="277" y="126">pool or host</text>
+  <path class="arrow" d="M382.5,150 L382.5,188"/>
+  <rect class="box" x="265" y="190" width="235" height="64" rx="6"/>
+  <text class="t" x="277" y="216">an S3 bucket</text>
+  <text class="m" x="277" y="236">or an S3-compatible server</text>
+  <path class="arrow" d="M382.5,254 L382.5,292"/>
+  <rect class="box" x="265" y="294" width="235" height="64" rx="6"/>
+  <text class="t" x="277" y="320">ynr central, full build</text>
+  <text class="m" x="277" y="340">reads the bucket</text>
+  <rect class="box" x="20" y="384" width="480" height="236" rx="6"/>
+  <text class="t" x="260.0" y="410" text-anchor="middle">The same code; three ports differ</text>
+  <path class="rule" d="M32,426 L488,426"/>
+  <text class="b" x="260.0" y="450" text-anchor="middle">Object store</text>
+  <text class="m" x="137.5" y="474" text-anchor="middle">a folder</text>
+  <text class="m" x="382.5" y="474" text-anchor="middle">S3 and S3-compatible servers</text>
+  <path class="rule" d="M32,490 L488,490"/>
+  <text class="b" x="260.0" y="514" text-anchor="middle">Change feed: how new files are seen</text>
+  <text class="m" x="137.5" y="538" text-anchor="middle">listing the folder</text>
+  <text class="m" x="382.5" y="538" text-anchor="middle">listing the current hour's prefix</text>
+  <path class="rule" d="M32,554 L488,554"/>
+  <text class="b" x="260.0" y="578" text-anchor="middle">Write identity: own segment only</text>
+  <text class="m" x="137.5" y="602" text-anchor="middle">file permissions</text>
+  <text class="m" x="382.5" y="602" text-anchor="middle">one IAM role for each collector</text>
+</svg>
