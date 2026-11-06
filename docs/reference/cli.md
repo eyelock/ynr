@@ -44,8 +44,9 @@ ynr info [--spool <root>] [--format text|json]
 | `--spool` | `$XDG_STATE_HOME/ynr/spool`, or `~/.local/state/ynr/spool` | The spool root. `YNR_SPOOL_ROOT` sets the default. |
 | `--format` | `text` | `text` or `json`. |
 
-With `--format json` the output has `version`, `build`, `capabilities`, `spool` and `serving`, which
-is `null` or an object with `pid` and `since`.
+With `--format json` the output has `version`, `build`, `capabilities`, `spool`, `serving`, which
+is `null` or an object with `pid` and `since`, and `relay`, the standing relay writing into the
+spool's `local/` folder: `null` or an object with `pid`, `since` and `endpoint`.
 
 ### ynr doctor
 
@@ -59,8 +60,8 @@ ynr doctor [--spool <root>] [--store <url>] [--format text|json]
 | `--store` | `file://$XDG_DATA_HOME/ynr/store`, or `file://~/.local/share/ynr/store` | The store `ynr serve` ships to. `YNR_STORE`. |
 | `--format` | `text` | `text` or `json`: `version`, `build` and `checks`, each with `name`, `status` and `detail`. |
 
-Checks, in order: `otlp`, `path`, `spool`, `serve`, `backlog`, `store`, `queries`. Each is `ok`,
-`warn` or `fail`. Exit 1 if any is not `ok`.
+Checks, in order: `otlp`, `path`, `spool`, `serve`, `relay`, `backlog`, `store`, `queries`. Each is
+`ok`, `warn` or `fail`. Exit 1 if any is not `ok`.
 
 ### ynr serve
 
@@ -159,6 +160,18 @@ exit it prints a line on stderr counting what it accepted, refused and stripped.
 
 It accepts OTLP/HTTP, protobuf or JSON, optionally gzipped, on `/v1/traces`, `/v1/metrics` and
 `/v1/logs`.
+
+With a fixed `--listen` port it is a standing relay, such as a Wheelhouse's (ADR-004): it records
+its pid, start time and endpoint in `.ynr-relay.lock` in its folder, which `ynr info` and `ynr
+doctor` read for the spool's `local/` folder, and it refuses to start while another standing relay
+holds that folder. When the port is taken it says so, naming the relay that holds it if that relay
+writes into the same folder. A relay on port `0`, such as a run's, records nothing.
+
+The default limits fit many seats at once. A Claude Code process sends well under one request a
+second, and a test sends 160 requests from 40 senders at one instant through one relay without a
+refusal. Against `--max-memory`, an uncompressed request of known length counts its own length;
+a gzipped or chunked one counts the full `--max-request`, so 16 of those at most are read at
+once at the defaults, and more are refused with `503` and `Retry-After`.
 
 Before writing a request to the spool, it strips the attributes that name a person, the machine,
 the user or a path on it (ADR-006, rule 10), wherever they appear in traces, metrics and logs: on the resource,

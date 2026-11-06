@@ -50,7 +50,8 @@ Each process writes its own files in its writer folder, so there is no locking:
 <service>-<instance id>-<seq>.jsonl         a closed file
 ```
 
-`ynr relay` names its files `ynr-relay-<pid>-<seq>`.
+`ynr relay` names its files `ynr-relay-<pid>-<seq>`. A standing relay (on a fixed port) also keeps
+`.ynr-relay.lock` in its folder, holding its pid, start time and endpoint; the reader skips it.
 
 Each line is one OTLP export request in the OTLP/JSON encoding: an `ExportTraceServiceRequest`
 (`resourceSpans`), an `ExportMetricsServiceRequest` (`resourceMetrics`) or an

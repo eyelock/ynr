@@ -18,6 +18,7 @@ import (
 	"os"
 	"strconv"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
@@ -25,6 +26,7 @@ import (
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
 	"golang.org/x/time/rate"
 
+	"github.com/eyelock/ynr/internal/spool"
 	"github.com/eyelock/ynr/spoolexporter"
 )
 
@@ -42,7 +44,10 @@ const (
 type Config struct {
 	// Dir is the writer folder the relay writes into: a run's folder in a factory job.
 	Dir string
-	// Listen is a loopback address; port 0 picks a free one, so parallel runs never collide.
+	// Listen is a loopback address; port 0 picks a free one, so parallel runs never collide. A
+	// fixed port makes this a standing relay, such as a Wheelhouse's: it records itself in the
+	// folder's spool.RelayLockName, for ynr info and ynr doctor, and refuses to share the folder
+	// with another standing relay.
 	Listen string
 	// Service and Instance name the relay's spool files.
 	Service, Instance string
@@ -76,6 +81,7 @@ type Relay struct {
 	srv      *http.Server
 	limiter  *rate.Limiter
 	scrub    *scrubber
+	lock     *spool.Lock // held by a standing relay; nil on port 0
 	inflight atomic.Int64
 	active   atomic.Int64 // requests being handled now
 
@@ -125,8 +131,30 @@ func New(cfg Config) (*Relay, error) {
 		return nil, fmt.Errorf("relay: spool folder %s is not a directory", cfg.Dir)
 	}
 	ln, err := net.Listen("tcp", cfg.Listen)
+	if errors.Is(err, syscall.EADDRINUSE) {
+		if h, _ := spool.RelayHolder(cfg.Dir); h != nil && h.PID != 0 {
+			return nil, fmt.Errorf("relay: %s is already in use: ynr relay pid %d serves %s into this folder", cfg.Listen, h.PID, h.Endpoint)
+		}
+		return nil, fmt.Errorf("relay: %s is already in use by another process: stop it, or choose another --listen port", cfg.Listen)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("relay: listening: %w", err)
+	}
+	var lock *spool.Lock
+	if _, port, _ := net.SplitHostPort(cfg.Listen); port != "0" {
+		lock, err = spool.AcquireRelay(cfg.Dir, spool.RelayInfo{
+			PID: os.Getpid(), Since: time.Now().UTC().Truncate(time.Second), Endpoint: "http://" + ln.Addr().String(),
+		})
+		if err != nil {
+			_ = ln.Close()
+			if errors.Is(err, spool.ErrRelaying) {
+				if h, _ := spool.RelayHolder(cfg.Dir); h != nil && h.PID != 0 {
+					return nil, fmt.Errorf("relay: ynr relay pid %d already serves %s into %s", h.PID, h.Endpoint, cfg.Dir)
+				}
+				return nil, fmt.Errorf("relay: another ynr relay already writes into %s", cfg.Dir)
+			}
+			return nil, fmt.Errorf("relay: lock: %w", err)
+		}
 	}
 	r := &Relay{
 		cfg: cfg,
@@ -134,6 +162,7 @@ func New(cfg Config) (*Relay, error) {
 			Dir: cfg.Dir, Service: cfg.Service, InstanceID: cfg.Instance,
 		}),
 		ln:      ln,
+		lock:    lock,
 		limiter: rate.NewLimiter(rate.Limit(cfg.Rate), cfg.Burst),
 		scrub:   newScrubber(cfg.Home),
 	}
@@ -180,6 +209,9 @@ func (r *Relay) Stats() Stats {
 // Serve handles requests until ctx is done, then stops accepting, waits up to Drain for
 // requests in flight, and flushes and closes the spool file.
 func (r *Relay) Serve(ctx context.Context) error {
+	if r.lock != nil {
+		defer r.lock.Release()
+	}
 	errc := make(chan error, 1)
 	go func() { errc <- r.srv.Serve(r.ln) }()
 	select {
@@ -273,15 +305,21 @@ func (r *Relay) handle(decode decoder) http.HandlerFunc {
 			return
 		}
 		// Reserve the most a request may hold once read, so the relay never holds more than
-		// MaxMemory however many requests arrive at once.
-		if r.inflight.Add(r.cfg.MaxRequest) > r.cfg.MaxMemory {
-			r.inflight.Add(-r.cfg.MaxRequest)
+		// MaxMemory however many requests arrive at once. An uncompressed request of known
+		// length can hold no more than its length, so many seats' small requests fit together;
+		// any other may hold up to MaxRequest.
+		reserve := r.cfg.MaxRequest
+		if enc := req.Header.Get("Content-Encoding"); req.ContentLength >= 0 && (enc == "" || enc == "identity") {
+			reserve = max(req.ContentLength, 1)
+		}
+		if r.inflight.Add(reserve) > r.cfg.MaxMemory {
+			r.inflight.Add(-reserve)
 			r.busy.Add(1)
 			w.Header().Set("Retry-After", "1")
 			http.Error(w, "busy", http.StatusServiceUnavailable)
 			return
 		}
-		defer r.inflight.Add(-r.cfg.MaxRequest)
+		defer r.inflight.Add(-reserve)
 
 		body, status := r.read(req)
 		if status != 0 {

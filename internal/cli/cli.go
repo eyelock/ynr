@@ -74,7 +74,9 @@ read from the environment only.
 
 ynr relay prints its OTLP/HTTP endpoint as its first line of output, then runs until it is
 stopped (Ctrl-C, SIGTERM, or with --exit-on-stdin-eof its standard input closing), flushing what
-it received into the folder.
+it received into the folder. With a fixed --listen port it is a standing relay, such as a
+Wheelhouse's: it records itself in the folder for ynr info and ynr doctor, and refuses to share
+the folder with another standing relay.
 
 ynr conformance runs the scenarios in a tool's conformance file against a temporary spool and a
 local test endpoint, and checks the instrumentation contract (ADR-006, ADR-008). It exits 1 if any
@@ -203,6 +205,8 @@ type infoReport struct {
 	Capabilities string          `json:"capabilities"`
 	Spool        string          `json:"spool"`
 	Serving      *spool.LockInfo `json:"serving"`
+	// Relay is the standing relay writing into the local folder, such as a Wheelhouse's.
+	Relay *spool.RelayInfo `json:"relay"`
 }
 
 func info(args []string, stdout, stderr io.Writer) int {
@@ -219,6 +223,10 @@ func info(args []string, stdout, stderr io.Writer) int {
 		return ExitAdapter
 	}
 	rep.Serving = holder
+	if rep.Relay, err = spool.RelayHolder(filepath.Join(*root, spool.LocalDir)); err != nil {
+		_, _ = fmt.Fprintf(stderr, "ynr: reading the relay lock: %v\n", err)
+		return ExitAdapter
+	}
 	switch *format {
 	case "json":
 		enc := json.NewEncoder(stdout)
@@ -230,6 +238,11 @@ func info(args []string, stdout, stderr io.Writer) int {
 			_, _ = fmt.Fprintf(stdout, "serving       pid %d since %s\n", holder.PID, holder.Since.Format(time.RFC3339))
 		} else {
 			_, _ = fmt.Fprintln(stdout, "serving       no")
+		}
+		if r := rep.Relay; r != nil {
+			_, _ = fmt.Fprintf(stdout, "relay         pid %d at %s since %s\n", r.PID, r.Endpoint, r.Since.Format(time.RFC3339))
+		} else {
+			_, _ = fmt.Fprintln(stdout, "relay         no")
 		}
 	default:
 		_, _ = fmt.Fprintf(stderr, "ynr: --format must be text or json\n")
