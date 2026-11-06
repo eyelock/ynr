@@ -25,7 +25,7 @@ JS := spoolexporter/js
 check: fmt-check generate-check vet lint slim-check js js-test test
 
 # The dashboard's templ templates, generated into Go and committed (ADR-005).
-TEMPL := go run github.com/a-h/templ/cmd/templ@v0.3.1070
+TEMPL := go run github.com/a-h/templ/cmd/templ@v0.3.1100
 
 generate:
 	$(TEMPL) generate -path internal/ui
