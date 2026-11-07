@@ -583,6 +583,22 @@ func TestRelay_StandingRelayLock(t *testing.T) {
 		t.Errorf("same port and folder: %v, want the holder named", err)
 	}
 
+	// A port taken by something else is not blamed on the folder's relay on another port.
+	other, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Close() }()
+	_, err = New(Config{Dir: dir, Listen: other.Addr().String()})
+	if err == nil || !strings.Contains(err.Error(), "by another process") || strings.Contains(err.Error(), "serves") {
+		t.Errorf("port held by another process: %v, want the 'another process' message", err)
+	}
+	// Listen may name localhost while the endpoint is 127.0.0.1: same port still names the relay.
+	_, port, _ := net.SplitHostPort(addr)
+	if _, err := New(Config{Dir: dir, Listen: "localhost:" + port}); err == nil || !strings.Contains(err.Error(), "ynr relay pid") {
+		t.Errorf("localhost spelling of the same port: %v, want the holder named", err)
+	}
+
 	stop()
 	if h, err := spool.RelayHolder(dir); err != nil || h != nil {
 		t.Errorf("after stop: holder = %+v, %v; want none", h, err)

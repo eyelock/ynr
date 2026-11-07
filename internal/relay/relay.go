@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -132,8 +133,12 @@ func New(cfg Config) (*Relay, error) {
 	}
 	ln, err := net.Listen("tcp", cfg.Listen)
 	if errors.Is(err, syscall.EADDRINUSE) {
-		if h, _ := spool.RelayHolder(cfg.Dir); h != nil && h.PID != 0 {
-			return nil, fmt.Errorf("relay: %s is already in use: ynr relay pid %d serves %s into this folder", cfg.Listen, h.PID, h.Endpoint)
+		h, _ := spool.RelayHolder(cfg.Dir)
+		if h != nil && h.PID != 0 {
+			if endpointPort(h.Endpoint) == listenPort(cfg.Listen) {
+				return nil, fmt.Errorf("relay: %s is already in use: ynr relay pid %d serves %s into this folder", cfg.Listen, h.PID, h.Endpoint)
+			}
+			return nil, fmt.Errorf("relay: %s is already in use by another process: stop it, or choose another --listen port (ynr relay pid %d already writes into this folder, on %s)", cfg.Listen, h.PID, h.Endpoint)
 		}
 		return nil, fmt.Errorf("relay: %s is already in use by another process: stop it, or choose another --listen port", cfg.Listen)
 	}
@@ -391,4 +396,15 @@ func contentType(v string) (json, ok bool) {
 		return true, true
 	}
 	return false, false
+}
+
+// listenPort is the port of a listen address such as localhost:4318.
+func listenPort(addr string) string {
+	_, port, _ := net.SplitHostPort(addr)
+	return port
+}
+
+// endpointPort is the port of a relay's endpoint URL such as http://127.0.0.1:4318.
+func endpointPort(endpoint string) string {
+	return listenPort(strings.TrimPrefix(endpoint, "http://"))
 }
