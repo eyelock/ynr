@@ -249,6 +249,26 @@ func TestUsageNamesEveryFlag(t *testing.T) {
 	}
 }
 
+// The ynr query usage line names its own flags, not just any flag the other commands share (--spool
+// is also tail's), and matches docs/reference/cli.md.
+func TestQueryUsageNamesItsFlags(t *testing.T) {
+	_, usage, _ := run("help")
+	i := strings.Index(usage, "  ynr query ")
+	if i < 0 {
+		t.Fatal("usage has no ynr query line")
+	}
+	block := usage[i:]
+	if j := strings.Index(block, "\n\n"); j >= 0 {
+		block = block[:j]
+	}
+	_, _, help := run("query", "runs", "-h")
+	for _, m := range regexp.MustCompile(`(?m)^\s+-([a-z][a-z-]*)`).FindAllStringSubmatch(help, -1) {
+		if !strings.Contains(block, "--"+m[1]) {
+			t.Errorf("the ynr query usage does not mention --%s", m[1])
+		}
+	}
+}
+
 // TestCollectorIDForAnyHost: every hostname gives an id the collector accepts, and two long ones
 // sharing a start stay apart. A CI runner's hostname is often longer than an id may be.
 func TestCollectorIDForAnyHost(t *testing.T) {
