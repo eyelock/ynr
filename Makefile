@@ -24,8 +24,11 @@ JS := spoolexporter/js
 
 check: fmt-check generate-check vet lint slim-check js js-test test
 
-# The dashboard's templ templates, generated into Go and committed (ADR-005).
-TEMPL := go run github.com/a-h/templ/cmd/templ@v0.3.1100
+# The dashboard's templ templates, generated into Go and committed (ADR-005). The generator is the
+# `tool` directive in go.mod, so it is always the version of the templ runtime in go.mod: one place
+# to bump. Taking a templ bump means running `make generate` and committing the *_templ.go changes;
+# Dependabot opens templ in its own PR (.github/dependabot.yml) for that reason.
+TEMPL := go tool templ
 
 generate:
 	$(TEMPL) generate -path internal/ui
