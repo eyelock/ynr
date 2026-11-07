@@ -85,7 +85,7 @@ a terminal, is the choice of whoever starts it. Elsewhere, configuration starts 
 | What | Started when | Configured in |
 |---|---|---|
 | `ynr serve` in a factory job | ynf's factory configuration enables the collector | ynf's local configuration (ynf ADR-009) |
-| `ynr relay` for a run | the run's telemetry relay setting is on | `ynh agent run --telemetry-relay`, `YNH_TELEMETRY_RELAY`, or ynh's configuration; a ynf lane sets the variable for its runs |
+| `ynr relay` for a run or a launch | the telemetry relay setting is on | `ynh agent run --telemetry-relay` and `ynh run`, `YNH_TELEMETRY_RELAY`, or ynh's configuration; a ynf lane sets the variable for its runs |
 | `ynr relay` for a Wheelhouse | the Wheelhouse's own start script, and its doctor checks it | the Wheelhouse (a plugin script), on a fixed loopback port it chooses |
 
 **`ynr info --format json`** reports the version, the build (`full` or `slim`, ADR-001), the
@@ -134,25 +134,26 @@ JSON, optionally gzipped, and prints its
 endpoint as its first line of output (`--format json` adds its pid), which is how whoever started it
 learns where to point the vendor. With `--exit-on-stdin-eof` it also stops when its standard input
 closes, so it ends with the process that started it even if that process is killed outright. When
-the relay setting is on and `ynr` is present, `ynh agent run` starts it for the length of the run,
-configures the vendor CLI, and stops it after the vendor exits and the relay has flushed:
+the relay setting is on and `ynr` is present, `ynh agent run` and `ynh run` each start one for the
+length of the run or launch, configure the vendor CLI, and stop it after the vendor exits and the
+relay has flushed (amended 2026-11-07: `ynh run` too, see "`ynh run` records every launch" below):
 
 | Vendor | Configured with |
 |---|---|
 | Claude Code | `CLAUDE_CODE_ENABLE_TELEMETRY=1`, `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER` and `OTEL_LOGS_EXPORTER` set to `otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`, `OTEL_EXPORTER_OTLP_ENDPOINT` set to the relay, `TRACEPARENT`, and `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, without which it sends no spans. Verified with Claude Code 2.1.289: its `claude_code.interaction` span joins `TRACEPARENT`, and with prompt logging off a prompt's text arrives as `<REDACTED>`. Prompt logging is never turned on. |
 | Codex | an `[otel]` block in a run-local copy of its `config.toml`, with the full signal path in the endpoint, since Codex is not configured through the environment. Whether it reads `TRACEPARENT` is unverified. |
 
-**A Wheelhouse has a standing relay.** `ynh agent run` is not how a Wheelhouse's seats launch:
-they start through `ynh run` or as subagents of the desk's session, and nothing in a Wheelhouse
-owns a run from start to finish. So `ynr relay` has a second use beside the per-run relay: one
-relay for the whole Wheelhouse, long-lived, on a fixed loopback port instead of a random one, so
-every seat that starts, now or later, can be pointed at the same endpoint. It is the same command
-with the same limits, but the Wheelhouse's seats share it, so its limits are sized for many seats at
-once. ynr still never daemonises: whoever runs the Wheelhouse starts the relay and keeps it
-running, in the foreground like any other role, and the Wheelhouse's doctor checks that it is up
-(`ynr doctor` also sees it).
+**A Wheelhouse may have a standing relay.** Amended 2026-11-07. Seats start through `ynh run`, and
+the desk's delegates are sessions of their own (below), so a per-launch relay serves one seat and
+ends with it. A Wheelhouse that wants one endpoint for every seat, started now or later, can run
+`ynr relay` as a standing relay instead: the same command with the same limits, long-lived, on a
+fixed loopback port instead of a random one, with limits sized for many seats at once. It is the
+alternative to the per-launch relay, no longer the only way and not specific to Claude Code (see
+"`ynh run` records every launch"). ynr still never daemonises: whoever runs the Wheelhouse starts
+the standing relay and keeps it running, in the foreground like any other role, and the
+Wheelhouse's doctor checks that it is up (`ynr doctor` also sees it).
 
-**The Wheelhouse relay writes to the `local/` folder of the laptop spool** (the default
+**A Wheelhouse's standing relay writes to the `local/` folder of the laptop spool** (the default
 `$XDG_STATE_HOME/ynr/spool/local`), the one a laptop's `ynr serve` already reads. It is not a run,
 so it gets no `runs/<run id>/` folder, and not a factory or a hosted service, so ADR-003 gives its
 records `ynr.provenance` of `local`, stamped by `ynr serve` from the folder and overwriting
@@ -169,31 +170,58 @@ selects one Wheelhouse. This ADR states the design; the build is ynw-17g.14 to y
 **The Wheelhouse's standing relay holds the HMAC key.** ADR-006 rule 10 hashes account identifiers
 (`user.id`, `user.account_uuid`, `user.account_id`, `organization.id`) with a key, so the same
 account hashes alike across records without the id being recoverable. The Wheelhouse's standing
-relay is the one that holds that key. A per-run relay, such as that of `ynh agent run`, has none, so
-it drops those ids instead of hashing them.
+relay is the one that holds that key. A per-run or per-launch relay, such as that of `ynh agent
+run` or `ynh run`, has none, so it drops those ids instead of hashing them.
 
-**`ynh run` wires the vendor itself when a relay endpoint is configured.** `ynh run` still ends in
-an exec of the vendor CLI, so ynh has no process to own a span (see Alternatives). It can still set
-the vendor's environment before the exec, because the vendor inherits it and reports itself. When
-an endpoint is configured for `ynh run` (a flag, an environment variable or ynh's configuration;
-off by default, and loopback only, ADR-006 rule 14), and the vendor is Claude Code, ynh sets, in
-the same way as the table above, `CLAUDE_CODE_ENABLE_TELEMETRY=1`,
-`CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1`, `OTEL_TRACES_EXPORTER`, `OTEL_METRICS_EXPORTER` and
-`OTEL_LOGS_EXPORTER` set to `otlp`, `OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf`,
-`OTEL_EXPORTER_OTLP_ENDPOINT` set to that endpoint, and `OTEL_LOG_TOOL_DETAILS=1`, without which
-Claude Code does not name its subagents. Prompt logging is never turned on. It appends to
-`OTEL_RESOURCE_ATTRIBUTES` the harness name and version, the focus and the profile, and the run
-labels (`ynh.label.<key>`, so `ynh.label.wheelhouse`), under ynh's registry names (ADR-007),
-percent-encoded and without spaces, since one space makes Claude Code drop every key. This wiring,
-the environment list, the space behaviour and the subagent names were verified with Claude Code
-2.1.316, as the per-run table above is for 2.1.289. A seat that `ynh run` launched is therefore
-named by those resource attributes; a
+**`ynh run` records every launch, for every vendor.** Amended 2026-11-07, superseding the
+2026-11-01 decision that `ynh run` emits nothing of its own and only wires Claude Code. That
+decision rested on `ynh run` ending in an exec of the vendor, which left ynh no process to own a
+span. `ynh run` now stays alive as the parent of every vendor CLI (ynh #774), so it can, and the
+principle is that telemetry works through ynh for any vendor (claude, codex, cursor, copilot,
+opencode) and a vendor's own telemetry only enriches it. In three parts:
+
+1. **Layer 1, ynh's own record.** For every launch and every vendor, `ynh run` writes a
+   `ynh.session` span with `ynh.session.started` and `ynh.session.finished` events and its own
+   outcome vocabulary (proposed: `exited`, `failed`, `signalled`, `refused`). It shares
+   `ynh.harness.*`, the vendor, the focus, the profile and `ynh.label.<key>` with `ynh agent run`'s
+   `ynh.run` span, which stays `ynh agent run`'s alone. It carries no tokens or cost, since an
+   interactive vendor reports none to ynh; those come from the vendor's own records. It follows
+   the destination order above (an operator's `OTEL_EXPORTER_OTLP_*`, the spool, nothing) and is
+   written whenever a destination exists. Under `--sandbox srt` the relay is skipped with a note,
+   but `ynh.session` is still written, since ynh runs outside the sandbox.
+2. **Enrichment, the vendor's own telemetry.** Where the vendor can export telemetry, `ynh run`
+   points it at a relay, wired as in the table above (for Claude Code, the same environment,
+   including `OTEL_LOG_TOOL_DETAILS=1`, without which it does not name its subagents; prompt
+   logging is never turned on). The relay is, by default, a per-launch `ynr relay` that `ynh run`
+   starts and stops with the launch, switched like `ynh agent run`'s (`--telemetry-relay`,
+   `YNH_TELEMETRY_RELAY`, `telemetry_relay` in ynh's configuration). When a standing relay
+   endpoint is configured (a flag, an environment variable or ynh's configuration; loopback only,
+   ADR-006 rule 14), `ynh run` points the vendor at it instead and starts none. The operator's
+   `OTEL_EXPORTER_OTLP_*` wins over both. A vendor that exports no telemetry still has its layer 1
+   record.
+3. **Delegate sessions.** Each `delegates_to` entry runs as its own ynh session behind a ynh MCP
+   server (decided 2026-11-03), not as a native subagent of the parent, so each leaves its own
+   `ynh.session` record.
+
+**A vendor's records join `ynh.session` in three layers.** Interactive Claude Code ignores an
+inbound `TRACEPARENT`, so no single mechanism joins every vendor:
+
+1. `ynh run` always sets `TRACEPARENT` naming the `ynh.session` span. Codex honours it; interactive
+   Claude Code does not; Copilot, OpenCode and Cursor are unchecked.
+2. `ynh run` always appends `ynh.session.id` to the vendor's `OTEL_RESOURCE_ATTRIBUTES`, beside the
+   labels. This works for any vendor that honours the standard variable.
+3. A per-launch relay stamps `ynh.session.id` on every record it receives (ynw-17g.28, to be
+   built), so a vendor that ignores the first two is still joined. A standing relay serves many
+   seats and cannot know which launch a record belongs to, so only layers 1 and 2 apply to it.
+
+The `ynh run` wiring, the environment list, the space behaviour (`OTEL_RESOURCE_ATTRIBUTES` is
+percent-encoded and without spaces, since one space makes Claude Code drop every key) and the
+subagent names were verified with Claude Code 2.1.316, as the per-run table above is for 2.1.289.
+A seat that `ynh run` launched is named by those resource attributes and by `ynh.session`; a
 subagent of the desk is named by Claude Code's own `agent.name` and subagent type, which
-`OTEL_LOG_TOOL_DETAILS=1` provides. There is no `TRACEPARENT` and no `ynh run` span: interactive
-Claude Code ignores an inbound `TRACEPARENT`, so the records are Claude Code's own and are read as
-they are. `OTEL_LOG_TOOL_DETAILS=1` also puts tool inputs on the records, so it is only safe behind
-the relay's strip list and hashing of account identifiers (ADR-006 rule 10), which is why the
-endpoint must be a relay, never an arbitrary collector.
+`OTEL_LOG_TOOL_DETAILS=1` provides. `OTEL_LOG_TOOL_DETAILS=1` also puts tool inputs on the
+records, so it is only safe behind the relay's strip list and hashing of account identifiers
+(ADR-006 rule 10), which is why the endpoint must be a relay, never an arbitrary collector.
 
 **The relay's settings stay with the vendor.** Claude Code does not pass its `OTEL_*` settings to
 the processes it starts, so an MCP server the agent launches over stdio, such as ynm, does not see
@@ -217,7 +245,7 @@ check on it (ADR-008).
 | Tool | Emits |
 |---|---|
 | ynf | a trace per step, decisions, actions on trackers and forges, the CloudEvents mirror (ADR-003), metrics, its bridged logs |
-| ynh | `ynh agent run`: started and finished events, a span per run with its outcome, turns, tokens, cost and bound. No other command emits ynh's own telemetry; `ynh run` only sets the vendor's environment so that the vendor reports itself |
+| ynh | `ynh agent run`: started and finished events, a `ynh.run` span per run with its outcome, turns, tokens, cost and bound. `ynh run`, for every launch and vendor: a `ynh.session` span with started and finished events and its outcome, and the vendor's environment set so that the vendor reports itself and joins it |
 | ynm | server spans for MCP and HTTP requests, store and consolidation spans, and audit events through a new `otel` provider behind ynm ADR-017's audit seam; hosted, it writes to `services/ynm/` with its own `ynr serve` beside it |
 
 **Images.** The slim build of `ynr` ships in ynh's base image, and so in ynf's factory image built
@@ -235,19 +263,26 @@ turns nothing on.
 - **Start a collector when `ynr` is found.** Not chosen: a background process nobody asked for.
 - **Start the Wheelhouse relay from `ynh run`.** Not chosen: a process the launcher starts is
   per launch, ends with it, and means every seat starts its own. A relay that belongs to the
-  Wheelhouse and outlives any one seat is started by the Wheelhouse.
+  Wheelhouse and outlives any one seat is started by the Wheelhouse. (Amended 2026-11-07: the
+  per-launch relay is now ynh run's default, and a configured standing relay the alternative. What
+  stays not chosen is `ynh run` starting a relay that outlives the launch.)
 - **A per-user service install for laptops** (launchd, systemd). Not chosen: `ynr` is a command
   that does one thing while it runs; supervising it belongs to whoever starts it.
-- **Instrument every ynh command.** Not chosen: `ynh run` replaces its own process with the
-  vendor CLI, so ynh has no process left to own a span, and `ynh agent run` is the one command that
-  stays alive to report. That holds for ynh's own span, not for the vendor, which inherits ynh's
-  environment and can report itself, so `ynh run` wires the vendor's own telemetry to a relay
-  instead of emitting any of its own.
+- **Instrument every ynh command.** Not chosen for the commands that do not run work, such as
+  `ynh install` or `ynh ls`. For `ynh run` it was rejected until 2026-11-07, on the ground that
+  `ynh run` replaced its own process with the vendor CLI and left ynh nothing to own a span, and it
+  is now chosen: `ynh run` supervises every vendor (ynh #774), so it writes `ynh.session`.
+- **Claude Code's own telemetry as the only Wheelhouse source** (ynw-8kl decision A1, recorded by
+  [ynr #95](https://github.com/eyelock/ynr/pull/95)). Superseded 2026-11-07: it covered one vendor
+  and left a launch of any other vendor with no record, against the principle that telemetry works
+  through ynh for any vendor.
 
 ## Consequences
 
 - Each sibling depends on the OpenTelemetry SDK and the spool exporter for its language.
 - A run that is killed leaves its started events and every batch already written.
+- A launch through `ynh run` leaves a `ynh.session` record whichever vendor it starts, so a
+  vendor with no telemetry of its own is still counted.
 
 ## Open questions
 
@@ -262,3 +297,10 @@ turns nothing on.
   a per-run relay drops the account ids.
 - 2026-11-07: `ynr info --format json` reports the standing relay writing into the spool as `relay`
   (`null`, or `pid`, `since` and `endpoint`).
+- 2026-11-07: `ynh run` writes its own `ynh.session` record for every launch and every vendor, and the
+  vendor's telemetry only enriches it, joined by `TRACEPARENT`, `ynh.session.id` and the relay's
+  stamp; the relay is per launch by default, with a configured standing relay as the alternative and
+  no longer Claude Code only; each delegate is a session of its own. Supersedes ynw-8kl decision A1
+  as [ynr #95](https://github.com/eyelock/ynr/pull/95) recorded it ("no `ynh run` span", wiring
+  "when the vendor is Claude Code"). Design: ynw-17g.20 (decisions 6 to 8) and ynw-17g.23; this
+  amendment is ynw-17g.27.
