@@ -38,3 +38,22 @@ CREATE MACRO otel_temporality(j) AS CASE otel_text(j)
   WHEN '1' THEN 'delta' WHEN 'AGGREGATION_TEMPORALITY_DELTA' THEN 'delta'
   WHEN '2' THEN 'cumulative' WHEN 'AGGREGATION_TEMPORALITY_CUMULATIVE' THEN 'cumulative'
   END;
+
+-- A run's labels (ADR-006 rule 10): a map of key to value from the resource's ynh.label.<key>
+-- attributes, the key without the prefix. A key set twice keeps its first value, because a map
+-- refuses a duplicate key and one bad record must not fail every query.
+CREATE MACRO labels_of(res) AS map_from_entries(
+  list_filter(
+    list_transform(
+      list_filter(res, lambda a: starts_with(a.k, 'ynh.label.') AND length(a.k) > 10 AND a.v IS NOT NULL),
+      lambda a: struct_pack(k := substr(a.k, 11), v := a.v)),
+    lambda e, i: i = list_position(
+      list_transform(
+        list_filter(res, lambda a: starts_with(a.k, 'ynh.label.') AND length(a.k) > 10 AND a.v IS NOT NULL),
+        lambda a: substr(a.k, 11)), e.k)));
+
+-- True when every wanted label matches. want is the labels joined by chr(31), each as key:value,
+-- or empty for no filter. A key never holds a colon, so the first colon splits a pair.
+CREATE MACRO labels_match(m, want) AS want = '' OR list_bool_and(list_transform(
+  string_split(want, chr(31)),
+  lambda w: coalesce(element_at(m, split_part(w, ':', 1))[1] = substr(w, strpos(w, ':') + 1), false)));

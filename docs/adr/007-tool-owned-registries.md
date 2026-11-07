@@ -22,6 +22,14 @@ Standard OpenTelemetry names are shared by all. The factory attributes ynr stamp
 manifest (`ynf.lane`, `ynf.lane.harness`, `ynf.lane.focus`, ADR-003) are ynf's names, declared in
 ynf's registry; ynr applies them on ynf's behalf.
 
+**A registry may declare a template attribute under its tool's prefix.** Where a tool lets users
+choose the key, such as ynh's run labels (`ynh.label.<key>`, ADR-006 rule 10), its registry
+declares one attribute template, `ynh.label.<key>` of type `template[string]`, not every key.
+A template counts as declared for every key under it: a record carrying `ynh.label.ticket` is not
+an unknown name, and `ynr.registry.unknown_names` does not count it. A template belongs to its
+tool's prefix like any other name, so a tool cannot declare one under another tool's prefix. The
+value limits are rule 10's, and the tool enforces them; the registry does not list the values.
+
 **ynr's registry covers only what ynr itself writes:** `ynr.provenance`, `ynr.collector.id`, and
 ynr's own telemetry, such as dropped records and unknown names.
 
@@ -86,3 +94,5 @@ has a name.
 ## History
 
 - 2026-10-05: drafted.
+- 2026-11-03: a registry may declare a template attribute under its tool's prefix, and a template
+  counts as declared for every key.

@@ -3,6 +3,7 @@ package registry
 import (
 	"slices"
 	"sort"
+	"strings"
 	"sync"
 
 	"go.opentelemetry.io/collector/pdata/pcommon"
@@ -23,12 +24,18 @@ const maxName = 128
 // names is what one registry declares, as sets, so the check is one lookup per name.
 type nameSets struct {
 	attrs, spans, events, metrics map[string]struct{}
+	// templates are the prefixes of template attributes, each with its trailing dot: a registry
+	// that declares ynh.label.<key> as template[string] declares every name under "ynh.label.".
+	templates []string
 }
 
 func setsOf(r *Registry) *nameSets {
 	s := &nameSets{attrs: map[string]struct{}{}, spans: map[string]struct{}{}, events: map[string]struct{}{}, metrics: map[string]struct{}{}}
 	for _, a := range r.Attributes {
 		s.attrs[a.ID] = struct{}{}
+		if strings.HasPrefix(a.Type, "template[") {
+			s.templates = append(s.templates, strings.TrimSuffix(a.ID, ".<key>")+".")
+		}
 	}
 	for _, a := range r.Standard {
 		s.attrs[a] = struct{}{}
@@ -178,8 +185,21 @@ func (s scope) check(set map[string]struct{}, name string) {
 	}
 }
 
+// declaredByTemplate says whether a template attribute declares the name: a key under its prefix.
+func (n *nameSets) declaredByTemplate(name string) bool {
+	for _, t := range n.templates {
+		if len(name) > len(t) && strings.HasPrefix(name, t) {
+			return true
+		}
+	}
+	return false
+}
+
 func (s scope) attrs(m pcommon.Map) {
 	m.Range(func(k string, _ pcommon.Value) bool {
+		if s.sets.declaredByTemplate(k) {
+			return true
+		}
 		s.check(s.sets.attrs, k)
 		return true
 	})

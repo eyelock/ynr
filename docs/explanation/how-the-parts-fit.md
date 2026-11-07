@@ -6,22 +6,18 @@ the same on a laptop and in the cloud.
 
 ## The path
 
-```
- tools                  collector                  object store               central
- ─────                  ─────────                  ────────────               ───────
- ynh, ynf, ynm  ──►  spool  ──►  ynr serve  ──►  batches (JSON)  ──►  ynr central
- vendor CLIs    ──►  ynr relay ─┘  stamps, ships    then Parquet        hot tier, compaction,
-                      (files)                       rollups, index      item index, queries
-                                                                              │
-                                                                  dashboard (sign-in) and ynr query
-```
+![How a record travels through ynr: tools and ynr relay write the spool, ynr serve ships it to the store, and a reader shows it](how-the-parts-fit-path.svg)
 
-1. **A tool writes a file.** ynh, ynf and ynm write OpenTelemetry JSON lines into a spool folder with
-   a shared exporter. A vendor CLI such as Claude Code can only export over the network, so
-   `ynr relay` receives it on a loopback port and writes the same kind of file.
+1. **A tool writes a file.** `ynh agent run`, ynf and ynm write OpenTelemetry JSON lines into their
+   writer folder in the spool with a shared exporter: the Go module `spoolexporter`, or the npm package
+   `@eyelock/otel-spool-exporter` in ynm's case. The spool is the only contract between a tool and
+   ynr, and the folder a file is in decides its provenance. A vendor CLI such as Claude Code or Codex
+   can only export over the network, so `ynr relay` receives it on a loopback port, strips the
+   attributes that name a person, the machine or a path on it, and writes the same kind of file.
 2. **`ynr serve` reads the spool, stamps and ships.** It reads every writer folder, adds where each
-   record came from, and uploads compressed batches to the object store. It advances its position in
-   a file only once the batch holding those lines is committed.
+   record came from, and uploads compressed batches to the object store. With `--upstream` it also
+   forwards to any OTLP/HTTP endpoint. It advances its position in a file only once the batch holding
+   those lines is committed.
 3. **The object store holds batches, then Parquet.** A batch is the spool's own format, so a
    collector never needs a Parquet writer or DuckDB. After an hour closes, the reader of the store
    compacts it into Parquet parts, keeps an item index, and writes daily and monthly rollups.
@@ -37,6 +33,8 @@ to central. They write to the bucket, and central reads from it.
 On a laptop, the full build's `ynr serve` plays the collector's part and the reader's: it ships to a
 folder, keeps the hot tier, compacts, and serves the local dashboard. In the cloud, the same code is
 split across machines: many slim `ynr serve` collectors ship to a bucket, and `ynr central` reads it.
+
+![One design for a laptop and the cloud: the same code, with three ports that differ](how-the-parts-fit-laptop-and-cloud.svg)
 
 What differs is a small set of adapters behind three ports:
 

@@ -5,7 +5,7 @@ store's records. They need the full build. The list below is the catalogue in
 `internal/query/query.go`.
 
 ```
-ynr query <name> [argument] [--since <window>] [--until <time>] [--lane <id>] [--format text|json]
+ynr query <name> [argument] [--since <window>] [--until <time>] [--lane <id>] [--label key:value]... [--format text|json]
 ```
 
 A **run** is a span named `ynh.run`: one `ynh agent run`, whether a factory or a person started it.
@@ -23,7 +23,11 @@ A **step** is identified by `ynf.step.id`, an **item** by `ynf.item.key`, and a 
 `--since` is a duration back from now (`24h`, `7d`) or an RFC 3339 time; `--until` is a time and
 defaults to now. `--since` must be before `--until`. A query that takes an argument needs it, and a
 query that does not take one refuses it. `--lane` narrows `runs`, `recent`, `items` and `cost` to one
-lane id; `item` and `trace` ignore it.
+lane id; `item` and `trace` ignore it. `--label key:value`, repeatable, keeps only runs whose
+[labels](#promoted-columns) include every one given (so two labels combine with AND): it narrows `runs`,
+`recent`, `items`, `item` and `cost`, and `trace` ignores it. It travels to `ynr serve` and `ynr central`
+like `--lane`. `runs` and `cost` over more than 7 days read rollups, which keep no labels, so a label
+with such a window is refused; narrow the window.
 
 ## runs
 
@@ -162,6 +166,12 @@ a tool has its own name for the same thing, the first one present wins.
 | `collector_id` | `ynr.collector.id` |
 | `collector_instance` | `ynr.collector.instance` |
 | `received_at` | `ynr.received_at`, as a time in UTC |
+
+`labels` is a `MAP(VARCHAR, VARCHAR)` of every `ynh.label.<key>` resource attribute, keyed by the key
+without the prefix (`labels['wheelhouse']`), empty when the record has none. It is a column of its own,
+not one column per key, and it is built from the resource only: a `ynh.label.*` attribute on a span or
+log record is not a label. A key set twice keeps its first value. The grammar of keys and values is
+[ADR-006](../adr/006-sibling-instrumentation-contract.md) rule 10.
 
 A span's `cost_usd` is `ynh.run.cost_usd`. A record is kept once: a span by its trace id and span id,
 and a log record or metric point by a hash of its content and resource, so a batch shipped twice is
