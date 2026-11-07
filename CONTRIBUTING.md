@@ -37,7 +37,9 @@ Code style:
 - Anything using DuckDB is behind `//go:build full` with a `!full` stub; the slim build must never
   import DuckDB (`make check` verifies it).
 - The dashboard's templ templates are generated into Go and committed: run `make generate` after
-  changing them.
+  changing them. The generator is the `tool` directive in `go.mod`, so it always matches the templ
+  runtime; a templ version bump (Dependabot sends it alone) is taken the same way: run
+  `make generate` and commit the changed `*_templ.go`.
 
 ## Commits and pull requests
 

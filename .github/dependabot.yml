@@ -20,6 +20,10 @@ updates:
     commit-message:
       prefix: "deps"
     groups:
+      # templ arrives alone: a bump needs the generated *_templ.go regenerated and committed
+      # (make generate), which would otherwise hold up the rest of the group.
+      templ:
+        patterns: ["github.com/a-h/templ"]
       go:
         patterns: ["*"]
 
