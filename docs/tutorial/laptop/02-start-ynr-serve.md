@@ -56,6 +56,7 @@ version       v0.2.0-14-g47b1a89 (full)
 capabilities  0.1.0
 spool         /Users/you/ynr-tutorial/state/ynr/spool
 serving       pid 64318 since 2026-10-08T10:30:54Z
+relay         no
 ```
 
 `serving` now names the process. `info` reads it from the lock file `ynr serve` keeps in the spool.
@@ -72,6 +73,7 @@ ok    otlp      no OTEL_EXPORTER_OTLP_*ENDPOINT set, so tools write to ynr's spo
 ok    path      ynr on PATH is this one: /Users/you/ynr-tutorial/bin/ynr
 ok    spool     /Users/you/ynr-tutorial/state/ynr/spool
 ok    serve     pid 64318 since 2026-10-08T10:30:54Z
+ok    relay     no standing ynr relay writes into /Users/you/ynr-tutorial/state/ynr/spool/local
 ok    backlog   0 files, 0.0 MiB
 ok    store     file:///Users/you/ynr-tutorial/data/ynr/store (0 rollup files)
 ok    queries   ynr serve answers ynr query from its hot tier

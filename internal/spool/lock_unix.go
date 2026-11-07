@@ -71,3 +71,59 @@ func Holder(root string) (*LockInfo, error) {
 	}
 	return &info, nil
 }
+
+// RelayLockName is the file a standing ynr relay keeps in the writer folder it writes into
+// (ADR-004). The reader skips it; it is never a spool file.
+const RelayLockName = ".ynr-relay.lock"
+
+// ErrRelaying means another ynr relay already writes into the folder.
+var ErrRelaying = errors.New("spool: another ynr relay writes into this folder")
+
+// RelayInfo is what a standing relay records in its lock file, for ynr info and ynr doctor.
+type RelayInfo struct {
+	PID      int       `json:"pid"`
+	Since    time.Time `json:"since"`
+	Endpoint string    `json:"endpoint"`
+}
+
+// AcquireRelay takes the relay lock on a writer folder and records info in it, or returns
+// ErrRelaying if another process holds it.
+func AcquireRelay(dir string, info RelayInfo) (*Lock, error) {
+	f, err := os.OpenFile(filepath.Join(dir, RelayLockName), os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		_ = f.Close()
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return nil, ErrRelaying
+		}
+		return nil, err
+	}
+	b, _ := json.Marshal(info)
+	if err := f.Truncate(0); err == nil {
+		_, _ = f.WriteAt(b, 0)
+	}
+	return &Lock{f: f}, nil
+}
+
+// RelayHolder reports which standing relay writes into dir, if any.
+func RelayHolder(dir string) (*RelayInfo, error) {
+	f, err := os.Open(filepath.Join(dir, RelayLockName))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_SH|syscall.LOCK_NB); err == nil {
+		_ = syscall.Flock(int(f.Fd()), syscall.LOCK_UN)
+		return nil, nil
+	}
+	var info RelayInfo
+	if err := json.NewDecoder(f).Decode(&info); err != nil {
+		return &RelayInfo{}, nil
+	}
+	return &info, nil
+}

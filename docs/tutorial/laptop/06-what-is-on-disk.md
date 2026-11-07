@@ -24,6 +24,7 @@ version       v0.2.0-14-g47b1a89 (full)
 capabilities  0.1.0
 spool         /Users/you/ynr-tutorial/state/ynr/spool
 serving       no
+relay         no
 ```
 
 Nothing of yours is running now. You can close terminals A and B.

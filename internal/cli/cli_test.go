@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -262,5 +263,61 @@ func TestCollectorIDForAnyHost(t *testing.T) {
 	}
 	if got := collectorIDFor("Davids-MacBook-Pro.local"); got != "local-davids-macbook-pro" {
 		t.Errorf("short hostname = %q, want it unchanged", got)
+	}
+}
+
+// TestInfoAndDoctorSeeTheStandingRelay: a relay on a fixed port writing into the spool's local
+// folder, as a Wheelhouse runs one, shows in ynr info and ynr doctor while it runs, and a second
+// one on that port is refused plainly.
+func TestInfoAndDoctorSeeTheStandingRelay(t *testing.T) {
+	root := t.TempDir()
+	if err := spool.Init(root); err != nil {
+		t.Fatal(err)
+	}
+	local := filepath.Join(root, spool.LocalDir)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	_, out, _ := run("info", "--spool", root)
+	if !strings.Contains(out, "relay         no") {
+		t.Errorf("info before = %s", out)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	pr, pw := io.Pipe()
+	var errb bytes.Buffer
+	code := make(chan int, 1)
+	go func() {
+		code <- Run(ctx, []string{"relay", "--spool", local, "--listen", addr}, pw, &errb)
+		_ = pw.Close()
+	}()
+	if _, err := bufio.NewReader(pr).ReadBytes('\n'); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, _ = io.Copy(io.Discard, pr) }()
+
+	_, out, _ = run("info", "--spool", root, "--format", "json")
+	var rep infoReport
+	if json.Unmarshal([]byte(out), &rep) != nil || rep.Relay == nil || rep.Relay.Endpoint != "http://"+addr {
+		t.Errorf("info while relaying = %s", out)
+	}
+	c := checkRelay(root)
+	if c.Status != statusOK || !strings.Contains(c.Detail, "http://"+addr) {
+		t.Errorf("doctor relay = %+v", c)
+	}
+	if code, _, errOut := run("relay", "--spool", t.TempDir(), "--listen", addr); code != ExitConfig || !strings.Contains(errOut, "already in use") {
+		t.Errorf("second relay on the port = %d %q", code, errOut)
+	}
+
+	cancel()
+	if c := <-code; c != ExitOK {
+		t.Fatalf("exit %d: %s", c, errb.String())
+	}
+	if c := checkRelay(root); c.Status != statusOK || !strings.Contains(c.Detail, "no standing ynr relay") {
+		t.Errorf("doctor relay after stop = %+v", c)
 	}
 }

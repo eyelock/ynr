@@ -89,8 +89,10 @@ a terminal, is the choice of whoever starts it. Elsewhere, configuration starts 
 | `ynr relay` for a Wheelhouse | the Wheelhouse's own start script, and its doctor checks it | the Wheelhouse (a plugin script), on a fixed loopback port it chooses |
 
 **`ynr info --format json`** reports the version, the build (`full` or `slim`, ADR-001), the
-capabilities version, the spool root, and whether a `ynr serve` holds the spool, read from the
-lock file `ynr serve` keeps in the spool root:
+capabilities version, the spool root, whether a `ynr serve` holds the spool, read from the
+lock file `ynr serve` keeps in the spool root, and whether a standing `ynr relay` writes into it,
+read from the lock file the relay keeps there. `relay` is `null` when none does, otherwise the
+relay's `pid`, `since` and `endpoint`; a Wheelhouse's doctor reads it:
 
 ```json
 {
@@ -98,7 +100,8 @@ lock file `ynr serve` keeps in the spool root:
   "build": "full",
   "capabilities": "0.1.0",
   "spool": "/home/me/.local/state/ynr/spool",
-  "serving": { "pid": 4182, "since": "2026-10-05T09:14:02Z" }
+  "serving": { "pid": 4182, "since": "2026-10-05T09:14:02Z" },
+  "relay": { "pid": 5107, "since": "2026-11-07T08:00:00Z", "endpoint": "http://127.0.0.1:4318" }
 }
 ```
 
@@ -257,3 +260,5 @@ turns nothing on.
 - 2026-11-02: Wheelhouses sharing `local/` are told apart by the `ynh.label.wheelhouse` run label;
   the `ynh run` wiring is verified on Claude Code 2.1.316; the standing relay holds the HMAC key and
   a per-run relay drops the account ids.
+- 2026-11-07: `ynr info --format json` reports the standing relay writing into the spool as `relay`
+  (`null`, or `pid`, `since` and `endpoint`).

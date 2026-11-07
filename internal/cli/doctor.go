@@ -54,6 +54,7 @@ func doctor(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		checkPath(),
 		checkSpool(*root),
 		checkServing(*root),
+		checkRelay(*root),
 		checkBacklog(*root, time.Now()),
 		checkStore(*storeURL),
 		checkQueries(ctx, *root),
@@ -138,6 +139,21 @@ func checkServing(root string) check {
 		return check{"serve", statusWarn, "no ynr serve holds the spool, so nothing is shipped"}
 	}
 	return check{"serve", statusOK, fmt.Sprintf("pid %d since %s", info.PID, info.Since.Format(time.RFC3339))}
+}
+
+// checkRelay reports the standing relay writing into the local folder, such as a Wheelhouse's
+// (ADR-004). Most machines run none, so its absence is not a warning: the Wheelhouse's own doctor
+// says whether it needs one.
+func checkRelay(root string) check {
+	dir := filepath.Join(root, spool.LocalDir)
+	info, err := spool.RelayHolder(dir)
+	switch {
+	case err != nil:
+		return check{"relay", statusFail, err.Error()}
+	case info == nil:
+		return check{"relay", statusOK, "no standing ynr relay writes into " + dir}
+	}
+	return check{"relay", statusOK, fmt.Sprintf("pid %d at %s since %s, into %s", info.PID, info.Endpoint, info.Since.Format(time.RFC3339), dir)}
 }
 
 // checkBacklog warns when closed files wait long in the spool: ynr serve ships a closed file at
