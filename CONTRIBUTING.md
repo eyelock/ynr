@@ -17,7 +17,7 @@ ynr uses gitflow. `develop` is the default branch.
 
 `main` takes PRs only from `develop`, `release/*` and `hotfix/*`; do not target it. Branch rules
 are described in [.github/BRANCH_PROTECTION.md](.github/BRANCH_PROTECTION.md). A PR needs the
-**All Clear** check green and is squash-merged.
+**All Clear** check green and goes through the merge queue, which squashes it.
 
 ## Development
 

@@ -6,7 +6,7 @@ and set up again from nothing.
 | File | What it manages |
 |---|---|
 | `repository.tf` | The repository: description, topics, visibility, features, merge options; and the docs site, GitHub Pages from `/docs` on `main` |
-| `branches.tf` | Gitflow: `develop` as the default branch, and a repository ruleset on each of `develop` and `main`: a pull request with conversations resolved and "All Clear" green (plus "Verify PR source branch" into `main`, so it takes only `develop`, `release/*` and `hotfix/*`), no force-push or delete, repository admins can bypass. See [`.github/BRANCH_PROTECTION.md`](../../.github/BRANCH_PROTECTION.md) |
+| `branches.tf` | Gitflow: `develop` as the default branch, and a repository ruleset on each of `develop` and `main`: a pull request with conversations resolved and "All Clear" green (plus "Verify PR source branch" into `main`, so it takes only `develop`, `release/*` and `hotfix/*`), the merge queue (squash on `develop`, merge commit on `main`), no force-push or delete, repository admins can bypass. See [`.github/BRANCH_PROTECTION.md`](../../.github/BRANCH_PROTECTION.md) |
 | `labels.tf` | Issue and PR labels, authoritatively: a label not listed is removed |
 | `actions.tf` | Actions permissions, the read-only default `GITHUB_TOKEN`, and that the `RELEASE_TOKEN` secret exists |
 | `security.tf` | Dependabot alerts and security updates, and private vulnerability reporting once the repository is public. Secret scanning and push protection are in `repository.tf`, on when `visibility` is `public` |

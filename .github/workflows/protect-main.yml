@@ -10,6 +10,7 @@ on:
   # Required on main, so it must report in the merge queue too; the source branch was checked on
   # the pull request, and a queue run has no head_ref.
   merge_group:
+    branches: [main]
 
 jobs:
   check-source-branch:

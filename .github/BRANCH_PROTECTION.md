@@ -24,9 +24,15 @@ a ruleset requires must keep that trigger, or the queue waits forever for a chec
 reports. A push to `main` or `develop` is never cancelled by the next one. The queue merges by
 squash on `develop` and by merge commit on `main`.
 
+The one exception is the back-merge. Once per release, `main` is merged back into `develop` with a
+pull request from `main` into `develop`, and that must land as a merge commit; the `develop` queue
+would squash it, and `main`'s history would drop out of `develop`. A repository admin therefore
+merges it around the queue, with the ruleset bypass (**Merge without waiting for requirements**),
+choosing **Create a merge commit**. No other pull request goes around the queue.
+
 ## "Develop Branch Protection" (develop)
 
-- Changes reach `develop` through a pull request (squash or merge commit; rebase is off)
+- Changes reach `develop` through a pull request (through the merge queue, which squashes; rebase is off)
 - All review conversations must be resolved; no approving review is required
 - All Clear must pass; the branch need not be up to date with `develop`
 - Force pushes blocked
@@ -38,7 +44,7 @@ squash on `develop` and by merge commit on `main`.
 Everything above for `main`, plus:
 
 - Verify PR source branch must pass, so `main` moves only by release or hotfix
-- Release and hotfix PRs are merge commits, so the back-merge into `develop` is clean
+- Release and hotfix PRs go through the queue and land as merge commits, so `main`'s history is kept
 
 ## "Never Delete Main or Develop" (main and develop)
 

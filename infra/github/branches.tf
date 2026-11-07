@@ -16,14 +16,14 @@ locals {
   # PRs into main, so it takes only develop, release/* and hotfix/*.
   rulesets = {
     develop = {
-      name   = "Develop Branch Protection"
-      checks = ["All Clear"]
-      queue  = "SQUASH"
+      name         = "Develop Branch Protection"
+      checks       = ["All Clear"]
+      merge_method = "SQUASH"
     }
     main = {
-      name   = "Main Branch Protection"
-      checks = ["All Clear", "Verify PR source branch"]
-      queue  = "MERGE" # release and hotfix PRs are merge commits, so the back-merge is clean
+      name         = "Main Branch Protection"
+      checks       = ["All Clear", "Verify PR source branch"]
+      merge_method = "MERGE" # release and hotfix PRs are merge commits
     }
   }
 }
@@ -65,9 +65,11 @@ resource "github_repository_ruleset" "this" {
 
     # The merge queue: each pull request is tested merged with those ahead of it before it lands,
     # so two green pull requests that break each other cannot both reach the branch. The required
-    # checks run on the merge_group event (ci.yml, protect-main.yml).
+    # checks run on the merge_group event (ci.yml, protect-main.yml). develop squashes, as feature
+    # PRs always have; main makes merge commits. The one back-merge per release, main into develop,
+    # must be a true merge, so an admin merges it around the queue (the ruleset's admin bypass).
     merge_queue {
-      merge_method                      = each.value.queue
+      merge_method                      = each.value.merge_method
       grouping_strategy                 = "ALLGREEN"
       min_entries_to_merge              = 1
       max_entries_to_merge              = 5
