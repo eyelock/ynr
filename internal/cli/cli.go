@@ -60,7 +60,7 @@ Usage:
             [--flush-limit 2s] [--keep]
   ynr tail [--spool <root>] [--service <name>] [--item <key>] [--from-start] [--format text|json]
   ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>] [--label key:value]...
-            [--format text|json] [--socket <path>]]
+            [--format text|json] [--socket <path>] [--spool <root>] [--erase <file>]]
 
 ynr central reads a shared store, such as a bucket the collectors ship to: it keeps the last 6
 hours in a hot tier fed by polling each collector's new files, compacts closed hours under a
