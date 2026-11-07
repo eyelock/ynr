@@ -14,6 +14,16 @@ rename CI jobs freely; keep All Clear's `needs` list in step.
 Pull requests into `main` also require **Verify PR source branch** (`protect-main.yml`), which
 fails for any source branch other than `develop`, `release/*` or `hotfix/*`.
 
+## Merge queue
+
+Both branches use the merge queue: a pull request is added to the queue instead of merged, and is
+tested together with those ahead of it on a `gh-readonly-queue/*` branch before it lands. Two pull
+requests that are each green but break each other can no longer both reach the branch. The required
+checks therefore run on the `merge_group` event too (`ci.yml`, `protect-main.yml`); a workflow that
+a ruleset requires must keep that trigger, or the queue waits forever for a check that never
+reports. A push to `main` or `develop` is never cancelled by the next one. The queue merges by
+squash on `develop` and by merge commit on `main`.
+
 ## "Develop Branch Protection" (develop)
 
 - Changes reach `develop` through a pull request (squash or merge commit; rebase is off)

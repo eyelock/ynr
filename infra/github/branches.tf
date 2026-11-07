@@ -18,10 +18,12 @@ locals {
     develop = {
       name   = "Develop Branch Protection"
       checks = ["All Clear"]
+      queue  = "SQUASH"
     }
     main = {
       name   = "Main Branch Protection"
       checks = ["All Clear", "Verify PR source branch"]
+      queue  = "MERGE" # release and hotfix PRs are merge commits, so the back-merge is clean
     }
   }
 }
@@ -59,6 +61,19 @@ resource "github_repository_ruleset" "this" {
       require_code_owner_review         = false
       require_last_push_approval        = false
       required_review_thread_resolution = true
+    }
+
+    # The merge queue: each pull request is tested merged with those ahead of it before it lands,
+    # so two green pull requests that break each other cannot both reach the branch. The required
+    # checks run on the merge_group event (ci.yml, protect-main.yml).
+    merge_queue {
+      merge_method                      = each.value.queue
+      grouping_strategy                 = "ALLGREEN"
+      min_entries_to_merge              = 1
+      max_entries_to_merge              = 5
+      min_entries_to_merge_wait_minutes = 1
+      max_entries_to_build              = 5
+      check_response_timeout_minutes    = 60
     }
 
     required_status_checks {
