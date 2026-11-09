@@ -18,8 +18,8 @@ where the tag is cut. `main` takes pull requests only from `develop`, `release/*
 
 2. **Open a pull request into `main`,** from `develop`, or from `release/vX.Y.Z` cut from it if
    the release needs a change of its own. Put the release notes in the description. The checks
-   **All Clear** and **Verify PR source branch** must pass. Merge it with **Create a merge commit**
-   (not squash), so the back-merge into `develop` is clean. GitHub deletes a `release/*` branch when
+   **All Clear** and **Verify PR source branch** must pass. Add it to the merge
+   queue with **Merge when ready**; the `main` queue makes a merge commit, never a squash. GitHub deletes a `release/*` branch when
    its pull request merges.
 
 3. **Tag `vX.Y.Z` on `main` and push the tag.**
@@ -57,7 +57,9 @@ where the tag is cut. `main` takes pull requests only from `develop`, `release/*
    ```
 
 5. **Back-merge into `develop`** once the release works, with a pull request from `main` into
-   `develop`, merged with **Create a merge commit**.
+   `develop`. Do not send it through the merge queue: `develop`'s queue squashes, which would drop
+   `main`'s history out of `develop`. A repository admin merges it around the queue, with
+   **Merge without waiting for requirements** and **Create a merge commit**.
 
 The version is the tag: `ynr version` prints it, and a build from anything but a clean tag says
 `<tag>-<commits>-g<sha>`, with `-dirty` if the tree has changes.
@@ -72,9 +74,10 @@ Packages at the same version. After releasing one, raise the `spoolexporter` req
 
 ## A hotfix
 
-Branch `hotfix/<what>` from the release tag, fix, and open a pull request into `main`. Merge it with
-**Create a merge commit**, tag the next patch version on `main`, and back-merge `main` into `develop`
-once that release works.
+Branch `hotfix/<what>` from the release tag, fix, and open a pull request into `main`. Add it to the merge
+queue with **Merge when ready** (the `main` queue makes a merge commit), tag the next patch version
+on `main`, and back-merge `main` into `develop` once that release works, as in step 5 of the release
+above: around the queue, with a merge commit.
 
 ## The docs site
 
