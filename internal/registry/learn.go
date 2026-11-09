@@ -132,3 +132,21 @@ func LearnTools(ctx context.Context, tools []string, st store.Store, collector s
 	}
 	return c, problems
 }
+
+// Declared asks each named tool for its registry and returns the attributes they define under
+// their own prefixes (not the OpenTelemetry ones they merely use), each with the tool that
+// declares it. A tool that cannot be asked is an error: unlike LearnTools, the caller here is
+// checking a key against what a sibling declares and must not guess.
+func Declared(ctx context.Context, tools []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, tool := range tools {
+		l, err := Ask(ctx, tool)
+		if err != nil {
+			return nil, err
+		}
+		for _, a := range l.Registry.Attributes {
+			out[a.ID] = tool
+		}
+	}
+	return out, nil
+}

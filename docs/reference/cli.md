@@ -141,7 +141,7 @@ and `YNR_SESSION_SECRET`. See [Sign-in (OIDC)](sign-in.md).
 ```
 ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
           [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
-          [--exit-on-stdin-eof]
+          [--resource-attr <key=value>]... [--registry-tools ynh] [--exit-on-stdin-eof]
 ```
 
 Prints its OTLP/HTTP endpoint as its first line of output, then runs until stopped (Ctrl-C,
@@ -156,6 +156,8 @@ exit it prints a line on stderr counting what it accepted, refused and stripped.
 | `--max-request` | `4194304` | The largest request accepted, in bytes after decompression. |
 | `--max-memory` | `67108864` | The most bytes of requests held at once. |
 | `--rate` | `100` | Requests accepted a second, sustained (burst 200). |
+| `--resource-attr` | none | `key=value`, repeatable. Sets the attribute on the resource of every span, metric and log record the relay writes, replacing a value the vendor sent for the same key. The key must be an attribute a `--registry-tools` registry declares, such as `ynh.session.id`; any other key, an empty value or an unreadable registry is refused at start-up. |
+| `--registry-tools` | `ynh` | The tools whose registries say which `--resource-attr` keys are allowed, each run by bare name on `PATH` as `<tool> telemetry registry --format json`. Read only when `--resource-attr` is given. `YNR_REGISTRY_TOOLS`. |
 | `--exit-on-stdin-eof` | off | Also stops when standard input closes, so the relay ends with the process that started it. |
 
 It accepts OTLP/HTTP, protobuf or JSON, optionally gzipped, on `/v1/traces`, `/v1/metrics` and
@@ -189,6 +191,13 @@ rule 10).
 
 They are dropped, not hashed. The count is the `attributes stripped` figure in the exit line. Only
 attributes are scrubbed, not a log record's body or a span's name.
+
+`--resource-attr` runs after that, so it has the last word on its keys. A relay belongs to one
+launch, so stamping the launch's `ynh.session.id` joins a vendor's records to that launch even when
+the vendor ignores `TRACEPARENT` and `OTEL_RESOURCE_ATTRIBUTES`, as interactive Claude Code does.
+It reaches metrics too: `ynh.session.id` is the named exception to ADR-006 rule 8 (one value per
+launch, dropped or rolled up by ynr before rollups; ADR-004). The stamp adds only the value it is
+given, never content (ADR-006 rule 10), and is not counted as stripping.
 
 ### ynr telemetry registry
 

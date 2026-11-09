@@ -614,3 +614,126 @@ func TestRelay_PerRunRelayRecordsNothing(t *testing.T) {
 		t.Errorf("lock file: %v, want none", err)
 	}
 }
+
+// TestRelay_StampsResourceAttrs: every resource of every signal carries the configured attribute,
+// whether or not the vendor sent one, and a vendor's value for the same key is overridden. The
+// stamp adds nothing else, and a vendor attribute on a data point, span or record is left alone.
+func TestRelay_StampsResourceAttrs(t *testing.T) {
+	const key = "ynh.session.id"
+	dir := t.TempDir()
+	r, stop := start(t, Config{Dir: dir, ResourceAttrs: map[string]string{key: "sess-1"}})
+
+	td := ptrace.NewTraces()
+	for i, vendor := range []string{"", "vendor-value"} {
+		rs := td.ResourceSpans().AppendEmpty()
+		rs.Resource().Attributes().PutStr("service.name", "claude-code")
+		if vendor != "" {
+			rs.Resource().Attributes().PutStr(key, vendor)
+		}
+		sp := rs.ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+		sp.SetName("claude_code.interaction")
+		sp.SetSpanID([8]byte{byte(i + 1)})
+	}
+	tb, _ := ptraceotlp.NewExportRequestFromTraces(td).MarshalProto()
+	post(t, r.Endpoint()+"/v1/traces", "application/x-protobuf", tb, false)
+
+	md := pmetric.NewMetrics()
+	for _, vendor := range []string{"", "vendor-value"} {
+		rm := md.ResourceMetrics().AppendEmpty()
+		if vendor != "" {
+			rm.Resource().Attributes().PutStr(key, vendor)
+		}
+		m := rm.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+		m.SetName("claude_code.token.usage")
+		dp := m.SetEmptyGauge().DataPoints().AppendEmpty()
+		dp.SetIntValue(1)
+		dp.Attributes().PutStr(key, "kept-on-the-point")
+	}
+	mb, _ := pmetricotlp.NewExportRequestFromMetrics(md).MarshalJSON()
+	post(t, r.Endpoint()+"/v1/metrics", "application/json", mb, false)
+
+	ld := plog.NewLogs()
+	for _, vendor := range []string{"", "vendor-value"} {
+		rl := ld.ResourceLogs().AppendEmpty()
+		if vendor != "" {
+			rl.Resource().Attributes().PutStr(key, vendor)
+		}
+		lr := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+		lr.SetEventName("claude_code.api_request")
+	}
+	lb, _ := plogotlp.NewExportRequestFromLogs(ld).MarshalProto()
+	post(t, r.Endpoint()+"/v1/logs", "application/x-protobuf", lb, true)
+
+	stop()
+	lines := spoolLines(t, dir)
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3", len(lines))
+	}
+	check := func(signal string, n int, get func(i int) pcommon.Map) {
+		t.Helper()
+		if n != 2 {
+			t.Fatalf("%s: %d resources, want 2", signal, n)
+		}
+		for i := range n {
+			v, ok := get(i).Get(key)
+			if !ok || v.Str() != "sess-1" || get(i).Len() > 2 {
+				t.Errorf("%s resource %d: %v", signal, i, get(i).AsRaw())
+			}
+		}
+	}
+	for _, l := range lines {
+		switch {
+		case strings.Contains(l, "resourceSpans"):
+			req := ptraceotlp.NewExportRequest()
+			if err := req.UnmarshalJSON([]byte(l)); err != nil {
+				t.Fatal(err)
+			}
+			rs := req.Traces().ResourceSpans()
+			check("traces", rs.Len(), func(i int) pcommon.Map { return rs.At(i).Resource().Attributes() })
+		case strings.Contains(l, "resourceMetrics"):
+			req := pmetricotlp.NewExportRequest()
+			if err := req.UnmarshalJSON([]byte(l)); err != nil {
+				t.Fatal(err)
+			}
+			rm := req.Metrics().ResourceMetrics()
+			check("metrics", rm.Len(), func(i int) pcommon.Map { return rm.At(i).Resource().Attributes() })
+			dp := rm.At(0).ScopeMetrics().At(0).Metrics().At(0).Gauge().DataPoints().At(0)
+			if v, _ := dp.Attributes().Get(key); v.Str() != "kept-on-the-point" {
+				t.Errorf("a data point's own attribute was touched: %v", dp.Attributes().AsRaw())
+			}
+		case strings.Contains(l, "resourceLogs"):
+			req := plogotlp.NewExportRequest()
+			if err := req.UnmarshalJSON([]byte(l)); err != nil {
+				t.Fatal(err)
+			}
+			rl := req.Logs().ResourceLogs()
+			check("logs", rl.Len(), func(i int) pcommon.Map { return rl.At(i).Resource().Attributes() })
+		default:
+			t.Errorf("unrecognised line: %s", l)
+		}
+	}
+}
+
+// TestRelay_StampsAfterTheStripList: a stamp is the last word on its key, so even a key the strip
+// list drops is set; and a value the scrubber would drop is not what it stamps over.
+func TestRelay_StampsAfterTheStripList(t *testing.T) {
+	dir := t.TempDir()
+	r, stop := start(t, Config{Dir: dir, ResourceAttrs: map[string]string{"ynh.session.id": "s"}})
+	tb := traceBody(t)
+	post(t, r.Endpoint()+"/v1/traces", "application/x-protobuf", tb, false)
+	stop()
+	if l := spoolLines(t, dir); len(l) != 1 || !strings.Contains(l[0], `"ynh.session.id"`) || strings.Contains(l[0], "user.email") {
+		t.Errorf("lines = %v", l)
+	}
+	if s := r.Stats(); s.Stripped != 0 {
+		t.Errorf("stamping counted as stripping: %+v", s)
+	}
+}
+
+func TestNew_RefusesEmptyResourceAttr(t *testing.T) {
+	for _, m := range []map[string]string{{"": "v"}, {"ynh.session.id": ""}} {
+		if _, err := New(Config{Dir: t.TempDir(), ResourceAttrs: m}); err == nil {
+			t.Errorf("accepted %v", m)
+		}
+	}
+}

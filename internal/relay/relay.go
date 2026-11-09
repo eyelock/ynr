@@ -22,6 +22,7 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog/plogotlp"
 	"go.opentelemetry.io/collector/pdata/pmetric/pmetricotlp"
 	"go.opentelemetry.io/collector/pdata/ptrace/ptraceotlp"
@@ -61,6 +62,12 @@ type Config struct {
 	// Home is the user's home folder: any attribute whose value is it, or an absolute path under
 	// it, is stripped. Empty takes os.UserHomeDir.
 	Home string
+	// ResourceAttrs are set on the resource of every span, metric and log record the relay
+	// writes, overriding a value the vendor sent for the same key. They are applied after the
+	// strip list, so they are the last word on their keys, and they add only what the caller
+	// passed, never content (ADR-006 rule 10). The caller checks the keys against a sibling's
+	// registry (registry.Declared); the relay stamps what it is given.
+	ResourceAttrs map[string]string
 }
 
 // Stats counts what the relay did with the requests it received.
@@ -123,6 +130,11 @@ func New(cfg Config) (*Relay, error) {
 	}
 	if err := loopback(cfg.Listen); err != nil {
 		return nil, err
+	}
+	for k, v := range cfg.ResourceAttrs {
+		if k == "" || v == "" {
+			return nil, fmt.Errorf("relay: resource attribute %q=%q: key and value must not be empty", k, v)
+		}
 	}
 	fi, err := os.Lstat(cfg.Dir)
 	if err != nil {
@@ -252,6 +264,9 @@ func (r *Relay) decodeTraces(b []byte, js bool) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	r.stripped.Add(int64(r.scrub.traces(req.Traces())))
+	for _, rs := range req.Traces().ResourceSpans().All() {
+		r.stamp(rs.Resource().Attributes())
+	}
 	out, err := req.MarshalJSON()
 	return out, req.Traces().SpanCount(), err
 }
@@ -262,6 +277,9 @@ func (r *Relay) decodeMetrics(b []byte, js bool) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	r.stripped.Add(int64(r.scrub.metrics(req.Metrics())))
+	for _, rm := range req.Metrics().ResourceMetrics().All() {
+		r.stamp(rm.Resource().Attributes())
+	}
 	out, err := req.MarshalJSON()
 	return out, req.Metrics().DataPointCount(), err
 }
@@ -272,8 +290,18 @@ func (r *Relay) decodeLogs(b []byte, js bool) ([]byte, int, error) {
 		return nil, 0, err
 	}
 	r.stripped.Add(int64(r.scrub.logs(req.Logs())))
+	for _, rl := range req.Logs().ResourceLogs().All() {
+		r.stamp(rl.Resource().Attributes())
+	}
 	out, err := req.MarshalJSON()
 	return out, req.Logs().LogRecordCount(), err
+}
+
+// stamp sets the configured resource attributes on a resource, replacing a vendor's value.
+func (r *Relay) stamp(m pcommon.Map) {
+	for k, v := range r.cfg.ResourceAttrs {
+		m.PutStr(k, v)
+	}
 }
 
 func unmarshal(fromJSON, fromProto func([]byte) error, b []byte, js bool) error {
