@@ -341,3 +341,85 @@ func TestInfoAndDoctorSeeTheStandingRelay(t *testing.T) {
 		t.Errorf("doctor relay after stop = %+v", c)
 	}
 }
+
+// fakeYnh puts a ynh on the PATH that prints a registry declaring the given attributes.
+func fakeYnh(t *testing.T, attrs ...string) {
+	t.Helper()
+	var as []string
+	for _, a := range attrs {
+		as = append(as, `{"id":"`+a+`","type":"string"}`)
+	}
+	reg := `{"tool":"ynh","version":"1.0.0","attributes":[` + strings.Join(as, ",") + `]}`
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "reg.json"), []byte(reg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\ncat \"$(dirname \"$0\")/reg.json\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestRelayResourceAttrRefusals: a key no sibling registry declares, a malformed pair, and a
+// registry that cannot be read are all refused at start-up, before anything listens.
+func TestRelayResourceAttrRefusals(t *testing.T) {
+	fakeYnh(t, "ynh.session.id")
+	cases := map[string][]string{
+		"undeclared":  {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.other=x"},
+		"standard":    {"relay", "--spool", t.TempDir(), "--resource-attr", "service.name=x"},
+		"no tool":     {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.session.id=x", "--registry-tools", "ynr-no-such-tool"},
+		"not a pair":  {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.session.id"},
+		"empty value": {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.session.id="},
+		"two values":  {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.session.id=a", "--resource-attr", "ynh.session.id=b"},
+	}
+	for name, args := range cases {
+		var out, errb bytes.Buffer
+		if code := Run(context.Background(), args, &out, &errb); code == ExitOK {
+			t.Errorf("%s: exit 0, stderr %q", name, errb.String())
+		}
+		if out.Len() != 0 {
+			t.Errorf("%s: printed an endpoint: %q", name, out.String())
+		}
+	}
+}
+
+// TestRelayStampsTheDeclaredResourceAttr runs the command with a declared key and finds it on a
+// record whose vendor sent another value.
+func TestRelayStampsTheDeclaredResourceAttr(t *testing.T) {
+	fakeYnh(t, "ynh.session.id")
+	dir := t.TempDir()
+	pr, pw := io.Pipe()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var errb bytes.Buffer
+	code := make(chan int, 1)
+	go func() {
+		code <- Run(ctx, []string{"relay", "--spool", dir, "--format", "json", "--resource-attr", "ynh.session.id=sess-9"}, pw, &errb)
+	}()
+	var ready struct {
+		Endpoint string `json:"endpoint"`
+	}
+	if err := json.NewDecoder(pr).Decode(&ready); err != nil {
+		t.Fatalf("ready line: %v (%s)", err, errb.String())
+	}
+	body := `{"resourceLogs":[{"resource":{"attributes":[{"key":"ynh.session.id","value":{"stringValue":"vendor"}}]},"scopeLogs":[{"logRecords":[{"eventName":"x"}]}]}]}`
+	resp, err := http.Post(ready.Endpoint+"/v1/logs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	cancel()
+	if c := <-code; c != ExitOK {
+		t.Fatalf("exit %d: %s", c, errb.String())
+	}
+	entries, _ := os.ReadDir(dir)
+	var all string
+	for _, e := range entries {
+		b, _ := os.ReadFile(filepath.Join(dir, e.Name()))
+		all += string(b)
+	}
+	if !strings.Contains(all, "sess-9") || strings.Contains(all, "vendor") {
+		t.Errorf("spool = %s", all)
+	}
+}

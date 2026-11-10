@@ -14,7 +14,7 @@ given. Two secrets are read from the environment only.
 | `YNR_COLLECTOR_INSTANCE` | `serve` | The job within the pool. |
 | `YNR_UI` | `serve`, `central` | The dashboard's address. Loopback for `serve`. |
 | `YNR_ERASE` | `serve`, `central`, `query` | A file of handles to erase. |
-| `YNR_REGISTRY_TOOLS` | `serve` | Comma-separated tools whose registries to learn, by bare name on `PATH`. |
+| `YNR_REGISTRY_TOOLS` | `serve`, `relay` | Comma-separated tools whose registries to learn, by bare name on `PATH`. One variable serves both commands, but they differ. `serve` defaults to none and logs and skips a tool it cannot ask. `relay` reads it only when given `--resource-attr`, defaults to `ynh`, and refuses to start if a named tool is missing from `PATH` or fails. So a value set for `serve`, such as `ynh,ynf,ynm` on a machine without `ynf`, makes every `relay` given `--resource-attr` refuse to start; give that relay `--registry-tools` instead. |
 | `YNR_CENTRAL_STATE` | `central`, `query` | The folder for the hot tier's database, and so where `query` finds central's default socket. |
 | `YNR_CENTRAL_SOCKET` | `central`, `query` | The Unix socket central answers on, and `query` asks. |
 | `YNR_OIDC_ISSUER` | `central` | The OpenID Connect issuer URL. |
@@ -29,7 +29,7 @@ given. Two secrets are read from the environment only.
 | `YNR_SPOOL` | `relay` | The writer folder to write into, when `--spool` is not given. |
 | `XDG_STATE_HOME` | all | Where the spool and central's state default to: `$XDG_STATE_HOME/ynr/...`, else `~/.local/state/ynr/...`. |
 | `XDG_DATA_HOME` | all | Where the folder store defaults to: `$XDG_DATA_HOME/ynr/store`, else `~/.local/share/ynr/store`. |
-| `PATH` | `serve`, `conformance` | Where `ynr` finds the tools it runs by bare name: those named in `--registry-tools`, and the stub vendor and the tool under test. |
+| `PATH` | `serve`, `relay`, `conformance` | Where `ynr` finds the tools it runs by bare name: those named in `--registry-tools` (for `relay`, only when given `--resource-attr`), and the stub vendor and the tool under test. |
 | `AWS_*` | S3 stores | The AWS SDK's usual chain: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_PROFILE`, `AWS_REGION` and the rest. |
 
 `ynr doctor` also reads any `OTEL_EXPORTER_OTLP_*ENDPOINT` variable, to warn that it is set.
