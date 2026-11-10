@@ -737,3 +737,11 @@ func TestNew_RefusesEmptyResourceAttr(t *testing.T) {
 		}
 	}
 }
+
+func TestNew_RefusesStripListedResourceAttr(t *testing.T) {
+	for _, k := range Stripped {
+		if _, err := New(Config{Dir: t.TempDir(), ResourceAttrs: map[string]string{k: "v"}}); err == nil {
+			t.Errorf("accepted the strip-listed key %q", k)
+		}
+	}
+}

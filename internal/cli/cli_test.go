@@ -423,3 +423,19 @@ func TestRelayStampsTheDeclaredResourceAttr(t *testing.T) {
 		t.Errorf("spool = %s", all)
 	}
 }
+
+// TestRelayRefusesMisdeclaredAndStrippedKeys: a registry that declares host.name or user.email
+// makes the key refused (it is off-prefix and on the strip list), and the message says why.
+func TestRelayRefusesMisdeclaredAndStrippedKeys(t *testing.T) {
+	for _, key := range []string{"host.name", "user.email"} {
+		fakeYnh(t, "ynh.session.id", key)
+		var out, errb bytes.Buffer
+		code := Run(context.Background(), []string{"relay", "--spool", t.TempDir(), "--resource-attr", key + "=x"}, &out, &errb)
+		if code != ExitConfig || out.Len() != 0 {
+			t.Errorf("%s: exit %d, stdout %q", key, code, out.String())
+		}
+		if !strings.Contains(errb.String(), key) || !strings.Contains(errb.String(), "own prefix") {
+			t.Errorf("%s: unclear message %q", key, errb.String())
+		}
+	}
+}
