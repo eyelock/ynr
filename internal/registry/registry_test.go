@@ -303,3 +303,22 @@ func TestTemplateAttributeDeclaresEveryKeyUnderIt(t *testing.T) {
 		t.Errorf("a plain attribute declared a template: %+v", counts)
 	}
 }
+
+// TestDeclaredRefusesAMisdeclaredRegistry: a registry listing an id outside its tool's own prefix,
+// such as host.name or user.email, is refused, while one under the prefix is returned.
+func TestDeclaredRefusesAMisdeclaredRegistry(t *testing.T) {
+	reg := func(id string) string {
+		return `{"tool":"ynh","version":"1.0.0","attributes":[{"id":"ynh.session.id","type":"string"},{"id":"` + id + `","type":"string"}]}`
+	}
+	for _, id := range []string{"host.name", "user.email", "ynhx.other", "ynh."} {
+		fakeTool(t, "ynh", reg(id))
+		if got, err := Declared(context.Background(), []string{"ynh"}); err == nil {
+			t.Errorf("%s: accepted, got %v", id, got)
+		}
+	}
+	fakeTool(t, "ynh", reg("ynh.run.id"))
+	got, err := Declared(context.Background(), []string{"ynh"})
+	if err != nil || got["ynh.session.id"] != "ynh" || got["ynh.run.id"] != "ynh" {
+		t.Errorf("Declared = %v, %v", got, err)
+	}
+}

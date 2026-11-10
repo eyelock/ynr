@@ -136,7 +136,9 @@ func LearnTools(ctx context.Context, tools []string, st store.Store, collector s
 // Declared asks each named tool for its registry and returns the attributes they define under
 // their own prefixes (not the OpenTelemetry ones they merely use), each with the tool that
 // declares it. A tool that cannot be asked is an error: unlike LearnTools, the caller here is
-// checking a key against what a sibling declares and must not guess.
+// checking a key against what a sibling declares and must not guess. A registry that lists an
+// attribute outside its own tool's prefix (host.name, say) is mis-declared and refused whole,
+// so a sibling cannot make a key allowable by listing it.
 func Declared(ctx context.Context, tools []string) (map[string]string, error) {
 	out := map[string]string{}
 	for _, tool := range tools {
@@ -145,6 +147,9 @@ func Declared(ctx context.Context, tools []string) (map[string]string, error) {
 			return nil, err
 		}
 		for _, a := range l.Registry.Attributes {
+			if !strings.HasPrefix(a.ID, tool+".") || len(a.ID) == len(tool)+1 {
+				return nil, fmt.Errorf("%s telemetry registry: declares %q, which is not under its own prefix %q", tool, a.ID, tool+".")
+			}
 			out[a.ID] = tool
 		}
 	}

@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -134,6 +135,9 @@ func New(cfg Config) (*Relay, error) {
 	for k, v := range cfg.ResourceAttrs {
 		if k == "" || v == "" {
 			return nil, fmt.Errorf("relay: resource attribute %q=%q: key and value must not be empty", k, v)
+		}
+		if slices.Contains(Stripped, k) {
+			return nil, fmt.Errorf("relay: resource attribute %q is on the strip list (it names a person or the machine) and cannot be stamped", k)
 		}
 	}
 	fi, err := os.Lstat(cfg.Dir)
