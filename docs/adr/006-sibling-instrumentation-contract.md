@@ -77,8 +77,9 @@ tool.
       that names the file. The file must have mode 0600 and must not lie under the spool root,
       and the relay refuses one that does or that group or others can read. The key is never
       written to the spool, a log, a span or a metric, and never exported. With no key
-      configured (a per-run or per-launch relay, such as that of `ynh agent run` or `ynh run` in ADR-004, has none) the
-      relay drops these four attributes rather than keep them raw or hash them unkeyed (a plain hash of a guessable id can be reversed by trying ids). Losing the key
+      configured (a per-run or per-launch relay, such as that of `ynh agent run` or `ynh run` in
+      ADR-004, has none) the relay drops these four attributes rather than keep them raw or hash
+      them unkeyed (a plain hash of a guessable id can be reversed by trying ids). Losing the key
       means the relay can no longer reproduce the hashes: ids already hashed stay as they were
       and cannot be matched to new ones. Changing the key starts a new set of hashes the same
       way: records of one account before and after do not join, nothing in the spool can be
@@ -169,6 +170,8 @@ tool.
 - 2026-11-07: any-vendor telemetry through ynh. The ynh row names `ynh run`'s own `ynh.session`
   record for every launch and vendor, the vendor's telemetry only enriching it; rule 3 notes that a
   vendor ignoring `TRACEPARENT` is joined by `ynh.session.id` and the relay's stamp; rule 10 says
-  `ynh.session.id` is an id, not content and the one named exception to rule 8 (allowed on vendor metrics, one value per launch, dropped or rolled up by ynr before rollups; ynw-j4a7, option B), and that a per-launch relay holds no HMAC key. This
+  `ynh.session.id` is an id, not content, and that a per-launch relay holds no HMAC key. This
   supersedes ynw-8kl decision A1 as [ynr #95](https://github.com/eyelock/ynr/pull/95) recorded it
   (ynw-17g.27, from the design in ynw-17g.20).
+- 2026-11-09: `ynh.session.id` is the one named exception to rule 8: allowed on vendor metrics, one
+  value per launch, dropped or rolled up by ynr before rollups (ynw-j4a7, option B; ynw-8w20).

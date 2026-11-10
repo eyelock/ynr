@@ -164,8 +164,8 @@ it". Several Wheelhouses on one laptop share that folder and are told apart by t
 `wheelhouse:<name>`, which every harness in a Wheelhouse carries, becomes that resource attribute
 (decided 2026-11-02: general ynh labels, one attribute per key; the label rule is ADR-006 rule 10).
 `ynh run` appends it to the vendor's `OTEL_RESOURCE_ATTRIBUTES` and passes it to child processes
-through `YNH_LABELS`, so the desk's subagents carry it too, and `ynr query --label wheelhouse:<name>`
-selects one Wheelhouse. This ADR states the design; the build is ynw-17g.14 to ynw-17g.19.
+through `YNH_LABELS`, so the desk's subagents carry it too, and
+`ynr query --label wheelhouse:<name>` selects one Wheelhouse. This ADR states the design; the build is ynw-17g.14 to ynw-17g.19.
 
 **The Wheelhouse's standing relay holds the HMAC key.** ADR-006 rule 10 hashes account identifiers
 (`user.id`, `user.account_uuid`, `user.account_id`, `organization.id`) with a key, so the same
@@ -214,8 +214,8 @@ inbound `TRACEPARENT`, so no single mechanism joins every vendor:
    per launch, dropped or rolled up by ynr before rollups.
 3. A per-launch relay stamps `ynh.session.id` on every record it receives (ynw-17g.28, to be
    built), so a vendor that ignores the first two is still joined. The stamp goes on metrics too, under the
-   same rule 8 exception. A standing relay serves many
-   seats and cannot know which launch a record belongs to, so only layers 1 and 2 apply to it.
+   same rule 8 exception. A standing relay serves many seats and cannot know which launch a record
+   belongs to, so only layers 1 and 2 apply to it.
 
 The `ynh run` wiring, the environment list, the space behaviour (`OTEL_RESOURCE_ATTRIBUTES` is
 percent-encoded and without spaces, since one space makes Claude Code drop every key) and the
@@ -307,3 +307,6 @@ turns nothing on.
   as [ynr #95](https://github.com/eyelock/ynr/pull/95) recorded it ("no `ynh run` span", wiring
   "when the vendor is Claude Code"). Design: ynw-17g.20 (decisions 6 to 8) and ynw-17g.23; this
   amendment is ynw-17g.27.
+- 2026-11-09: `ynh.session.id` and the relay's stamp reach vendor metrics, under the one named
+  exception to ADR-006 rule 8 (one value per launch, dropped or rolled up by ynr before rollups;
+  ynw-j4a7, option B; ynw-8w20). Layers 2 and 3 say so.
