@@ -275,3 +275,50 @@ func TestCheckerCapsDistinctNamesAndStillCountsKnownOnes(t *testing.T) {
 		}
 	}
 }
+
+// TestTemplateAttributeDeclaresEveryKeyUnderIt: a registry that declares ynh.label as a
+// template[string] (or ynh.label.<key>) declares every key under it, so a label is not counted as
+// an unknown name, while a name outside the prefix, and the bare prefix, still are.
+func TestTemplateAttributeDeclaresEveryKeyUnderIt(t *testing.T) {
+	for _, id := range []string{"ynh.label", "ynh.label.<key>"} {
+		c := NewChecker()
+		c.Learn(&Registry{Tool: "ynh", Version: "1", Attributes: []Attribute{{ID: id, Type: "template[string]"}}, Spans: []Span{{Name: "ynh.run"}}})
+		c.Traces(traces("ynh", "1", map[string]string{"ynh.run": "ynh.label.wheelhouse"}))
+		c.Traces(traces("ynh", "1", map[string]string{"ynh.run": "ynh.label.ticket"}))
+		if counts, _ := c.Counts(); len(counts) != 0 {
+			t.Errorf("%s: labels counted as unknown: %+v", id, counts)
+		}
+		c.Traces(traces("ynh", "1", map[string]string{"ynh.run": "ynh.labelx"}))
+		c.Traces(traces("ynh", "1", map[string]string{"ynh.run": "ynh.label."}))
+		c.Traces(traces("ynh", "1", map[string]string{"ynh.run": "ynh.other.wheelhouse"}))
+		if counts, _ := c.Counts(); len(counts) != 3 {
+			t.Errorf("%s: want ynh.labelx, ynh.label. and ynh.other.wheelhouse counted, got %+v", id, counts)
+		}
+	}
+	// An attribute that is not a template does not declare a prefix.
+	c := NewChecker()
+	c.Learn(&Registry{Tool: "ynh", Version: "1", Attributes: []Attribute{{ID: "ynh.label", Type: "string"}}, Spans: []Span{{Name: "ynh.run"}}})
+	c.Traces(traces("ynh", "1", map[string]string{"ynh.run": "ynh.label.wheelhouse"}))
+	if counts, _ := c.Counts(); len(counts) != 1 {
+		t.Errorf("a plain attribute declared a template: %+v", counts)
+	}
+}
+
+// TestDeclaredRefusesAMisdeclaredRegistry: a registry listing an id outside its tool's own prefix,
+// such as host.name or user.email, is refused, while one under the prefix is returned.
+func TestDeclaredRefusesAMisdeclaredRegistry(t *testing.T) {
+	reg := func(id string) string {
+		return `{"tool":"ynh","version":"1.0.0","attributes":[{"id":"ynh.session.id","type":"string"},{"id":"` + id + `","type":"string"}]}`
+	}
+	for _, id := range []string{"host.name", "user.email", "ynhx.other", "ynh."} {
+		fakeTool(t, "ynh", reg(id))
+		if got, err := Declared(context.Background(), []string{"ynh"}); err == nil {
+			t.Errorf("%s: accepted, got %v", id, got)
+		}
+	}
+	fakeTool(t, "ynh", reg("ynh.run.id"))
+	got, err := Declared(context.Background(), []string{"ynh"})
+	if err != nil || got["ynh.session.id"] != "ynh" || got["ynh.run.id"] != "ynh" {
+		t.Errorf("Declared = %v, %v", got, err)
+	}
+}

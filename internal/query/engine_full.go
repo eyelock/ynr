@@ -93,6 +93,8 @@ func promotedSQL() string {
 		}
 		cols = append(cols, expr+" AS "+p.column)
 	}
+	// Every ynh.label.<key> resource attribute, as one map (ADR-006 rule 10).
+	cols = append(cols, "labels_of(resource) AS labels")
 	return strings.Join(cols, ",\n       ")
 }
 
@@ -182,7 +184,7 @@ func parquet(files []string) string {
 func runOn(ctx context.Context, db *sql.DB, q *Query, p Params) (*Result, error) {
 	rows, err := db.QueryContext(ctx, q.SQL,
 		sql.Named("since", p.Since.UTC()), sql.Named("until", p.Until.UTC()),
-		sql.Named("arg", p.Arg), sql.Named("lane", p.Lane))
+		sql.Named("arg", p.Arg), sql.Named("lane", p.Lane), sql.Named("labels", LabelsParam(p.Labels)))
 	if err != nil {
 		return nil, fmt.Errorf("query %s: %w", q.Name, err)
 	}

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -248,6 +249,26 @@ func TestUsageNamesEveryFlag(t *testing.T) {
 	}
 }
 
+// The ynr query usage line names its own flags, not just any flag the other commands share (--spool
+// is also tail's), and matches docs/reference/cli.md.
+func TestQueryUsageNamesItsFlags(t *testing.T) {
+	_, usage, _ := run("help")
+	i := strings.Index(usage, "  ynr query ")
+	if i < 0 {
+		t.Fatal("usage has no ynr query line")
+	}
+	block := usage[i:]
+	if j := strings.Index(block, "\n\n"); j >= 0 {
+		block = block[:j]
+	}
+	_, _, help := run("query", "runs", "-h")
+	for _, m := range regexp.MustCompile(`(?m)^\s+-([a-z][a-z-]*)`).FindAllStringSubmatch(help, -1) {
+		if !strings.Contains(block, "--"+m[1]) {
+			t.Errorf("the ynr query usage does not mention --%s", m[1])
+		}
+	}
+}
+
 // TestCollectorIDForAnyHost: every hostname gives an id the collector accepts, and two long ones
 // sharing a start stay apart. A CI runner's hostname is often longer than an id may be.
 func TestCollectorIDForAnyHost(t *testing.T) {
@@ -262,5 +283,159 @@ func TestCollectorIDForAnyHost(t *testing.T) {
 	}
 	if got := collectorIDFor("Davids-MacBook-Pro.local"); got != "local-davids-macbook-pro" {
 		t.Errorf("short hostname = %q, want it unchanged", got)
+	}
+}
+
+// TestInfoAndDoctorSeeTheStandingRelay: a relay on a fixed port writing into the spool's local
+// folder, as a Wheelhouse runs one, shows in ynr info and ynr doctor while it runs, and a second
+// one on that port is refused plainly.
+func TestInfoAndDoctorSeeTheStandingRelay(t *testing.T) {
+	root := t.TempDir()
+	if err := spool.Init(root); err != nil {
+		t.Fatal(err)
+	}
+	local := filepath.Join(root, spool.LocalDir)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+
+	_, out, _ := run("info", "--spool", root)
+	if !strings.Contains(out, "relay         no") {
+		t.Errorf("info before = %s", out)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	pr, pw := io.Pipe()
+	var errb bytes.Buffer
+	code := make(chan int, 1)
+	go func() {
+		code <- Run(ctx, []string{"relay", "--spool", local, "--listen", addr}, pw, &errb)
+		_ = pw.Close()
+	}()
+	if _, err := bufio.NewReader(pr).ReadBytes('\n'); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _, _ = io.Copy(io.Discard, pr) }()
+
+	_, out, _ = run("info", "--spool", root, "--format", "json")
+	var rep infoReport
+	if json.Unmarshal([]byte(out), &rep) != nil || rep.Relay == nil || rep.Relay.Endpoint != "http://"+addr {
+		t.Errorf("info while relaying = %s", out)
+	}
+	c := checkRelay(root)
+	if c.Status != statusOK || !strings.Contains(c.Detail, "http://"+addr) {
+		t.Errorf("doctor relay = %+v", c)
+	}
+	if code, _, errOut := run("relay", "--spool", t.TempDir(), "--listen", addr); code != ExitConfig || !strings.Contains(errOut, "already in use") {
+		t.Errorf("second relay on the port = %d %q", code, errOut)
+	}
+
+	cancel()
+	if c := <-code; c != ExitOK {
+		t.Fatalf("exit %d: %s", c, errb.String())
+	}
+	if c := checkRelay(root); c.Status != statusOK || !strings.Contains(c.Detail, "no standing ynr relay") {
+		t.Errorf("doctor relay after stop = %+v", c)
+	}
+}
+
+// fakeYnh puts a ynh on the PATH that prints a registry declaring the given attributes.
+func fakeYnh(t *testing.T, attrs ...string) {
+	t.Helper()
+	var as []string
+	for _, a := range attrs {
+		as = append(as, `{"id":"`+a+`","type":"string"}`)
+	}
+	reg := `{"tool":"ynh","version":"1.0.0","attributes":[` + strings.Join(as, ",") + `]}`
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "reg.json"), []byte(reg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	script := "#!/bin/sh\ncat \"$(dirname \"$0\")/reg.json\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "ynh"), []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+// TestRelayResourceAttrRefusals: a key no sibling registry declares, a malformed pair, and a
+// registry that cannot be read are all refused at start-up, before anything listens.
+func TestRelayResourceAttrRefusals(t *testing.T) {
+	fakeYnh(t, "ynh.session.id")
+	cases := map[string][]string{
+		"undeclared":  {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.other=x"},
+		"standard":    {"relay", "--spool", t.TempDir(), "--resource-attr", "service.name=x"},
+		"no tool":     {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.session.id=x", "--registry-tools", "ynr-no-such-tool"},
+		"not a pair":  {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.session.id"},
+		"empty value": {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.session.id="},
+		"two values":  {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.session.id=a", "--resource-attr", "ynh.session.id=b"},
+	}
+	for name, args := range cases {
+		var out, errb bytes.Buffer
+		if code := Run(context.Background(), args, &out, &errb); code == ExitOK {
+			t.Errorf("%s: exit 0, stderr %q", name, errb.String())
+		}
+		if out.Len() != 0 {
+			t.Errorf("%s: printed an endpoint: %q", name, out.String())
+		}
+	}
+}
+
+// TestRelayStampsTheDeclaredResourceAttr runs the command with a declared key and finds it on a
+// record whose vendor sent another value.
+func TestRelayStampsTheDeclaredResourceAttr(t *testing.T) {
+	fakeYnh(t, "ynh.session.id")
+	dir := t.TempDir()
+	pr, pw := io.Pipe()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var errb bytes.Buffer
+	code := make(chan int, 1)
+	go func() {
+		code <- Run(ctx, []string{"relay", "--spool", dir, "--format", "json", "--resource-attr", "ynh.session.id=sess-9"}, pw, &errb)
+	}()
+	var ready struct {
+		Endpoint string `json:"endpoint"`
+	}
+	if err := json.NewDecoder(pr).Decode(&ready); err != nil {
+		t.Fatalf("ready line: %v (%s)", err, errb.String())
+	}
+	body := `{"resourceLogs":[{"resource":{"attributes":[{"key":"ynh.session.id","value":{"stringValue":"vendor"}}]},"scopeLogs":[{"logRecords":[{"eventName":"x"}]}]}]}`
+	resp, err := http.Post(ready.Endpoint+"/v1/logs", "application/json", strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	cancel()
+	if c := <-code; c != ExitOK {
+		t.Fatalf("exit %d: %s", c, errb.String())
+	}
+	entries, _ := os.ReadDir(dir)
+	var all string
+	for _, e := range entries {
+		b, _ := os.ReadFile(filepath.Join(dir, e.Name()))
+		all += string(b)
+	}
+	if !strings.Contains(all, "sess-9") || strings.Contains(all, "vendor") {
+		t.Errorf("spool = %s", all)
+	}
+}
+
+// TestRelayRefusesMisdeclaredAndStrippedKeys: a registry that declares host.name or user.email
+// makes the key refused (it is off-prefix and on the strip list), and the message says why.
+func TestRelayRefusesMisdeclaredAndStrippedKeys(t *testing.T) {
+	for _, key := range []string{"host.name", "user.email"} {
+		fakeYnh(t, "ynh.session.id", key)
+		var out, errb bytes.Buffer
+		code := Run(context.Background(), []string{"relay", "--spool", t.TempDir(), "--resource-attr", key + "=x"}, &out, &errb)
+		if code != ExitConfig || out.Len() != 0 {
+			t.Errorf("%s: exit %d, stdout %q", key, code, out.String())
+		}
+		if !strings.Contains(errb.String(), key) || !strings.Contains(errb.String(), "own prefix") {
+			t.Errorf("%s: unclear message %q", key, errb.String())
+		}
 	}
 }

@@ -73,7 +73,9 @@ make full     # bin/ynr-full, the full build with DuckDB
 
 `go.work` builds ynr against the spool exporter in this repository; `go.mod` requires its last
 release, which is what `go install github.com/eyelock/ynr/cmd/ynr@<version>` uses. After
-releasing a new `spoolexporter/v*`, raise that requirement.
+releasing a new `spoolexporter/v*`, raise that requirement. `go.work.sum` is committed beside
+`go.work`, like `go.sum`, so CI verifies the workspace's checksums; `make check` regenerates it, so
+commit any change it shows rather than discarding it.
 
 Work goes on feature branches into `develop` by pull request; `main` moves only by release
 (gitflow, as in ynh, ynm and ynf). The repository's own settings are Terraform in

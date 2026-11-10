@@ -22,6 +22,7 @@ import (
 
 	"github.com/eyelock/ynr"
 	"github.com/eyelock/ynr/internal/collector"
+	"github.com/eyelock/ynr/internal/registry"
 	"github.com/eyelock/ynr/internal/relay"
 	"github.com/eyelock/ynr/internal/spool"
 	"github.com/eyelock/ynr/internal/stamp"
@@ -54,13 +55,13 @@ Usage:
              [--group-claim groups] [--session-ttl 8h]]
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
-            [--exit-on-stdin-eof]
+            [--resource-attr key=value]... [--registry-tools ynh] [--exit-on-stdin-eof]
   ynr telemetry registry [--format text|json]
   ynr conformance [--file .ynr/conformance.yaml] [--format text|json] [--timeout 60s]
             [--flush-limit 2s] [--keep]
   ynr tail [--spool <root>] [--service <name>] [--item <key>] [--from-start] [--format text|json]
-  ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>]
-            [--format text|json] [--socket <path>]]
+  ynr query [<name> [<argument>] [--store <url>] [--since 7d] [--until <time>] [--lane <id>] [--label key:value]...
+            [--format text|json] [--socket <path>] [--spool <root>] [--erase <file>]]
 
 ynr central reads a shared store, such as a bucket the collectors ship to: it keeps the last 6
 hours in a hot tier fed by polling each collector's new files, compacts closed hours under a
@@ -74,7 +75,11 @@ read from the environment only.
 
 ynr relay prints its OTLP/HTTP endpoint as its first line of output, then runs until it is
 stopped (Ctrl-C, SIGTERM, or with --exit-on-stdin-eof its standard input closing), flushing what
-it received into the folder.
+it received into the folder. With a fixed --listen port it is a standing relay, such as a
+Wheelhouse's: it records itself in the folder for ynr info and ynr doctor, and refuses to share
+the folder with another standing relay. --resource-attr (repeatable) sets an attribute on the
+resource of every record the relay writes, over a vendor's value; its key must be one a
+--registry-tools registry declares (default ynh), such as ynh.session.id, or the relay refuses to start.
 
 ynr conformance runs the scenarios in a tool's conformance file against a temporary spool and a
 local test endpoint, and checks the instrumentation contract (ADR-006, ADR-008). It exits 1 if any
@@ -105,7 +110,10 @@ Environment fallbacks: YNR_SPOOL_ROOT, YNR_STORE, YNR_UPSTREAM, YNR_COLLECTOR_ID
 YNR_COLLECTOR_INSTANCE, YNR_REGISTRY_TOOLS, YNR_ERASE and YNR_UI; for central also
 YNR_CENTRAL_STATE, YNR_CENTRAL_SOCKET (which ynr query reads too), YNR_OIDC_ISSUER,
 YNR_OIDC_CLIENT_ID, YNR_OIDC_REDIRECT_URL, YNR_ALLOW_EMAILS, YNR_ALLOW_DOMAIN, YNR_ALLOW_GROUP
-and YNR_GROUP_CLAIM; and YNR_SPOOL for the relay's folder.
+and YNR_GROUP_CLAIM; and YNR_SPOOL for the relay's folder. The relay also reads YNR_REGISTRY_TOOLS
+(default ynh) when given --resource-attr, and runs the tools named by bare name on the PATH. It is the
+same variable serve reads, but the relay refuses to start if a named tool is missing, so a value set
+for serve that names a tool absent from the PATH stops the relay.
 `
 
 // stdin is the relay's standard input, replaced in tests.
@@ -203,6 +211,8 @@ type infoReport struct {
 	Capabilities string          `json:"capabilities"`
 	Spool        string          `json:"spool"`
 	Serving      *spool.LockInfo `json:"serving"`
+	// Relay is the standing relay writing into the local folder, such as a Wheelhouse's.
+	Relay *spool.RelayInfo `json:"relay"`
 }
 
 func info(args []string, stdout, stderr io.Writer) int {
@@ -219,6 +229,10 @@ func info(args []string, stdout, stderr io.Writer) int {
 		return ExitAdapter
 	}
 	rep.Serving = holder
+	if rep.Relay, err = spool.RelayHolder(filepath.Join(*root, spool.LocalDir)); err != nil {
+		_, _ = fmt.Fprintf(stderr, "ynr: reading the relay lock: %v\n", err)
+		return ExitAdapter
+	}
 	switch *format {
 	case "json":
 		enc := json.NewEncoder(stdout)
@@ -230,6 +244,11 @@ func info(args []string, stdout, stderr io.Writer) int {
 			_, _ = fmt.Fprintf(stdout, "serving       pid %d since %s\n", holder.PID, holder.Since.Format(time.RFC3339))
 		} else {
 			_, _ = fmt.Fprintln(stdout, "serving       no")
+		}
+		if r := rep.Relay; r != nil {
+			_, _ = fmt.Fprintf(stdout, "relay         pid %d at %s since %s\n", r.PID, r.Endpoint, r.Since.Format(time.RFC3339))
+		} else {
+			_, _ = fmt.Fprintln(stdout, "relay         no")
 		}
 	default:
 		_, _ = fmt.Fprintf(stderr, "ynr: --format must be text or json\n")
@@ -386,6 +405,9 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	maxRequest := fs.Int64("max-request", relay.DefaultMaxRequest, "largest request accepted, in bytes after decompression")
 	maxMemory := fs.Int64("max-memory", relay.DefaultMaxMemory, "most bytes of requests held at once")
 	perSecond := fs.Float64("rate", relay.DefaultRate, "requests accepted a second, sustained")
+	var attrs resourceAttrs
+	fs.Var(&attrs, "resource-attr", "key=value set on the resource of every record the relay writes, overriding the vendor's; the key must be declared by a --registry-tools registry; repeatable")
+	relayTools := fs.String("registry-tools", env("YNR_REGISTRY_TOOLS", "ynh"), "tools whose telemetry registries declare the --resource-attr keys, by bare name on the PATH, comma separated (YNR_REGISTRY_TOOLS)")
 	stdinEOF := fs.Bool("exit-on-stdin-eof", false, "also stop when standard input closes, so the relay ends with the process that started it")
 	if err := fs.Parse(args); err != nil {
 		return ExitUsage
@@ -401,8 +423,22 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		_, _ = fmt.Fprintln(stderr, "ynr: --max-request, --max-memory and --rate must be positive")
 		return ExitConfig
 	}
+	if len(attrs) > 0 {
+		declared, err := registry.Declared(ctx, splitList(*relayTools))
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "ynr: --resource-attr: %v\n", err)
+			return ExitConfig
+		}
+		for k := range attrs {
+			if _, ok := declared[k]; !ok {
+				_, _ = fmt.Fprintf(stderr, "ynr: --resource-attr %s: no registry in %s declares it\n", k, *relayTools)
+				return ExitConfig
+			}
+		}
+	}
 	r, err := relay.New(relay.Config{
 		Dir: *dir, Listen: *listen, MaxRequest: *maxRequest, MaxMemory: *maxMemory, Rate: *perSecond,
+		ResourceAttrs: attrs,
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
@@ -435,6 +471,26 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return ExitAdapter
 	}
 	return ExitOK
+}
+
+// resourceAttrs collects the repeatable --resource-attr key=value flag.
+type resourceAttrs map[string]string
+
+func (a *resourceAttrs) String() string { return fmt.Sprint(map[string]string(*a)) }
+
+func (a *resourceAttrs) Set(v string) error {
+	k, val, ok := strings.Cut(v, "=")
+	if !ok || k == "" || val == "" {
+		return fmt.Errorf("%q is not key=value", v)
+	}
+	if *a == nil {
+		*a = map[string]string{}
+	}
+	if old, dup := (*a)[k]; dup && old != val {
+		return fmt.Errorf("%s is given two values", k)
+	}
+	(*a)[k] = val
+	return nil
 }
 
 // splitList splits a comma separated list, dropping blanks and repeats.

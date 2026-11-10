@@ -17,6 +17,7 @@ warn  otlp      OTEL_EXPORTER_OTLP_ENDPOINT set: tools export there instead of t
 ok    path      ynr on PATH is this one: /Users/you/ynr-tutorial/bin/ynr
 ok    spool     /Users/you/ynr-tutorial/state/ynr/spool
 warn  serve     no ynr serve holds the spool, so nothing is shipped
+ok    relay     no standing ynr relay writes into /Users/you/ynr-tutorial/state/ynr/spool/local
 ok    backlog   0 files, 0.0 MiB
 ok    store     file:///Users/you/ynr-tutorial/data/ynr/store (0 rollup files)
 warn  queries   no hot tier answering: ynr query reads the store directly, and needs the full build
@@ -35,6 +36,7 @@ your `ynr serve` uses.
 | `path` | The `ynr` your shell finds is the one running. | `warn`: no `ynr` is on `PATH`, so other tools will not find one, or a different `ynr` is. Fix the `PATH`; tools find each other by bare name only. |
 | `spool` | The spool exists and only its owner can open its `.ynr` folder. | `warn`: it does not exist yet (`ynr serve` creates it) or its permissions are wider than the owner's. `fail`: no spool root is set, or it cannot be read. |
 | `serve` | A `ynr serve` holds the spool; the pid and start time are shown. | `warn`: none does, so nothing is shipped. Start `ynr serve`. |
+| `relay` | Shows the standing relay writing into the spool's `local/` folder, such as a Wheelhouse's, with its pid, endpoint and start time, or that none does. Most machines run none, so its absence is still `ok`. | `fail`: its lock file cannot be read. |
 | `backlog` | No closed spool file has waited long to be shipped. | `warn`: a closed file has waited over 5 minutes. `ynr serve` ships a closed file at once, so it is not running or cannot reach its store. |
 | `store` | The store opens and lists. | `warn`: no store is set, so `ynr serve` ships only to an upstream. `fail`: the URL is invalid or the store cannot be listed, such as an S3 error or missing credentials. |
 | `queries` | A running `ynr serve` answers `ynr query` from its hot tier. | `warn`: nothing answers. `ynr query` then reads the store directly, which needs the full build. The slim build can never answer. |

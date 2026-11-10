@@ -11,9 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/eyelock/ynr/internal/spool"
 	"github.com/eyelock/ynr/spoolexporter"
 	"go.opentelemetry.io/collector/pdata/pcommon"
 	"go.opentelemetry.io/collector/pdata/plog"
@@ -108,6 +110,9 @@ func spoolLines(t *testing.T, dir string) []string {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
+		if e.Name() == spool.RelayLockName {
+			continue
+		}
 		if !strings.HasSuffix(e.Name(), ".jsonl") || strings.HasSuffix(e.Name(), ".open.jsonl") {
 			t.Errorf("unexpected file after close: %s", e.Name())
 			continue
@@ -480,5 +485,263 @@ func TestRelay_ReceivesSpoolexporterHTTPSender(t *testing.T) {
 	}
 	if s := r.Stats(); s.Accepted != 3 || s.Malformed != 0 {
 		t.Errorf("relay stats = %+v", s)
+	}
+}
+
+// freePort returns a loopback address on a port that was free a moment ago.
+func freePort(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	_ = ln.Close()
+	return addr
+}
+
+// TestRelay_ManySeatsAtDefaults: a Wheelhouse's seats share one standing relay. Claude Code
+// exports logs and spans about every 5 seconds and metrics every 60, so a seat sends well under
+// one request a second; 40 seats is about 16 a second against the default 100. Here all 40 flush
+// four requests at the same instant, 160 at once, within the default burst of 200, and every one
+// must reach the spool: none refused as busy or rate limited. Reserving the largest request size
+// for each, the default memory limit held only 16 at once, and under load this test saw 16 of 160
+// refused as busy; each now reserves its own length.
+func TestRelay_ManySeatsAtDefaults(t *testing.T) {
+	const seats, each = 40, 4
+	r, stop := start(t, Config{Listen: freePort(t)})
+	body := traceBody(t)
+	var wg sync.WaitGroup
+	gate := make(chan struct{})
+	codes := make(chan int, seats*each)
+	for range seats {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-gate
+			var inner sync.WaitGroup
+			for range each {
+				inner.Add(1)
+				go func() {
+					defer inner.Done()
+					req, _ := http.NewRequest(http.MethodPost, r.Endpoint()+"/v1/traces", bytes.NewReader(body))
+					req.Header.Set("Content-Type", "application/x-protobuf")
+					resp, err := http.DefaultClient.Do(req)
+					if err != nil {
+						codes <- 0
+						return
+					}
+					_ = resp.Body.Close()
+					codes <- resp.StatusCode
+				}()
+			}
+			inner.Wait()
+		}()
+	}
+	close(gate)
+	wg.Wait()
+	close(codes)
+	for c := range codes {
+		if c != http.StatusOK {
+			t.Errorf("request = %d, want 200", c)
+		}
+	}
+	dir := r.cfg.Dir
+	stop()
+	s := r.Stats()
+	if s.Accepted != seats*each || s.Busy != 0 || s.Limited != 0 || s.Spool.Dropped != 0 {
+		t.Errorf("stats = %+v, want %d accepted and nothing refused or dropped", s, seats*each)
+	}
+	if got := len(spoolLines(t, dir)); got != seats*each {
+		t.Errorf("spool lines = %d, want %d", got, seats*each)
+	}
+}
+
+// TestRelay_StandingRelayLock: a relay on a fixed port records itself in its folder, refuses a
+// second standing relay on that folder, says plainly when its port is taken, and lets go when it
+// stops.
+func TestRelay_StandingRelayLock(t *testing.T) {
+	dir := t.TempDir()
+	addr := freePort(t)
+	r, stop := start(t, Config{Dir: dir, Listen: addr})
+
+	h, err := spool.RelayHolder(dir)
+	if err != nil || h == nil {
+		t.Fatalf("holder = %v, %v; want the running relay", h, err)
+	}
+	if h.PID != os.Getpid() || h.Endpoint != r.Endpoint() {
+		t.Errorf("holder = %+v, want pid %d at %s", h, os.Getpid(), r.Endpoint())
+	}
+
+	if _, err := New(Config{Dir: dir, Listen: freePort(t)}); err == nil || !strings.Contains(err.Error(), "already serves") {
+		t.Errorf("second relay on the folder: %v, want a refusal naming the first", err)
+	}
+	if _, err := New(Config{Dir: t.TempDir(), Listen: addr}); err == nil || !strings.Contains(err.Error(), "already in use") {
+		t.Errorf("second relay on the port: %v, want 'already in use'", err)
+	}
+	if _, err := New(Config{Dir: dir, Listen: addr}); err == nil || !strings.Contains(err.Error(), "ynr relay pid") {
+		t.Errorf("same port and folder: %v, want the holder named", err)
+	}
+
+	// A port taken by something else is not blamed on the folder's relay on another port.
+	other, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = other.Close() }()
+	_, err = New(Config{Dir: dir, Listen: other.Addr().String()})
+	if err == nil || !strings.Contains(err.Error(), "by another process") || strings.Contains(err.Error(), "serves") {
+		t.Errorf("port held by another process: %v, want the 'another process' message", err)
+	}
+	// Listen may name localhost while the endpoint is 127.0.0.1: same port still names the relay.
+	_, port, _ := net.SplitHostPort(addr)
+	if _, err := New(Config{Dir: dir, Listen: "localhost:" + port}); err == nil || !strings.Contains(err.Error(), "ynr relay pid") {
+		t.Errorf("localhost spelling of the same port: %v, want the holder named", err)
+	}
+
+	stop()
+	if h, err := spool.RelayHolder(dir); err != nil || h != nil {
+		t.Errorf("after stop: holder = %+v, %v; want none", h, err)
+	}
+}
+
+// TestRelay_PerRunRelayRecordsNothing: a relay on port 0, such as ynh agent run's, leaves no
+// lock in its folder, so parallel runs and run captures are unchanged.
+func TestRelay_PerRunRelayRecordsNothing(t *testing.T) {
+	dir := t.TempDir()
+	start(t, Config{Dir: dir})
+	if _, err := os.Stat(filepath.Join(dir, spool.RelayLockName)); !os.IsNotExist(err) {
+		t.Errorf("lock file: %v, want none", err)
+	}
+}
+
+// TestRelay_StampsResourceAttrs: every resource of every signal carries the configured attribute,
+// whether or not the vendor sent one, and a vendor's value for the same key is overridden. The
+// stamp adds nothing else, and a vendor attribute on a data point, span or record is left alone.
+func TestRelay_StampsResourceAttrs(t *testing.T) {
+	const key = "ynh.session.id"
+	dir := t.TempDir()
+	r, stop := start(t, Config{Dir: dir, ResourceAttrs: map[string]string{key: "sess-1"}})
+
+	td := ptrace.NewTraces()
+	for i, vendor := range []string{"", "vendor-value"} {
+		rs := td.ResourceSpans().AppendEmpty()
+		rs.Resource().Attributes().PutStr("service.name", "claude-code")
+		if vendor != "" {
+			rs.Resource().Attributes().PutStr(key, vendor)
+		}
+		sp := rs.ScopeSpans().AppendEmpty().Spans().AppendEmpty()
+		sp.SetName("claude_code.interaction")
+		sp.SetSpanID([8]byte{byte(i + 1)})
+	}
+	tb, _ := ptraceotlp.NewExportRequestFromTraces(td).MarshalProto()
+	post(t, r.Endpoint()+"/v1/traces", "application/x-protobuf", tb, false)
+
+	md := pmetric.NewMetrics()
+	for _, vendor := range []string{"", "vendor-value"} {
+		rm := md.ResourceMetrics().AppendEmpty()
+		if vendor != "" {
+			rm.Resource().Attributes().PutStr(key, vendor)
+		}
+		m := rm.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+		m.SetName("claude_code.token.usage")
+		dp := m.SetEmptyGauge().DataPoints().AppendEmpty()
+		dp.SetIntValue(1)
+		dp.Attributes().PutStr(key, "kept-on-the-point")
+	}
+	mb, _ := pmetricotlp.NewExportRequestFromMetrics(md).MarshalJSON()
+	post(t, r.Endpoint()+"/v1/metrics", "application/json", mb, false)
+
+	ld := plog.NewLogs()
+	for _, vendor := range []string{"", "vendor-value"} {
+		rl := ld.ResourceLogs().AppendEmpty()
+		if vendor != "" {
+			rl.Resource().Attributes().PutStr(key, vendor)
+		}
+		lr := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+		lr.SetEventName("claude_code.api_request")
+	}
+	lb, _ := plogotlp.NewExportRequestFromLogs(ld).MarshalProto()
+	post(t, r.Endpoint()+"/v1/logs", "application/x-protobuf", lb, true)
+
+	stop()
+	lines := spoolLines(t, dir)
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3", len(lines))
+	}
+	check := func(signal string, n int, get func(i int) pcommon.Map) {
+		t.Helper()
+		if n != 2 {
+			t.Fatalf("%s: %d resources, want 2", signal, n)
+		}
+		for i := range n {
+			v, ok := get(i).Get(key)
+			if !ok || v.Str() != "sess-1" || get(i).Len() > 2 {
+				t.Errorf("%s resource %d: %v", signal, i, get(i).AsRaw())
+			}
+		}
+	}
+	for _, l := range lines {
+		switch {
+		case strings.Contains(l, "resourceSpans"):
+			req := ptraceotlp.NewExportRequest()
+			if err := req.UnmarshalJSON([]byte(l)); err != nil {
+				t.Fatal(err)
+			}
+			rs := req.Traces().ResourceSpans()
+			check("traces", rs.Len(), func(i int) pcommon.Map { return rs.At(i).Resource().Attributes() })
+		case strings.Contains(l, "resourceMetrics"):
+			req := pmetricotlp.NewExportRequest()
+			if err := req.UnmarshalJSON([]byte(l)); err != nil {
+				t.Fatal(err)
+			}
+			rm := req.Metrics().ResourceMetrics()
+			check("metrics", rm.Len(), func(i int) pcommon.Map { return rm.At(i).Resource().Attributes() })
+			dp := rm.At(0).ScopeMetrics().At(0).Metrics().At(0).Gauge().DataPoints().At(0)
+			if v, _ := dp.Attributes().Get(key); v.Str() != "kept-on-the-point" {
+				t.Errorf("a data point's own attribute was touched: %v", dp.Attributes().AsRaw())
+			}
+		case strings.Contains(l, "resourceLogs"):
+			req := plogotlp.NewExportRequest()
+			if err := req.UnmarshalJSON([]byte(l)); err != nil {
+				t.Fatal(err)
+			}
+			rl := req.Logs().ResourceLogs()
+			check("logs", rl.Len(), func(i int) pcommon.Map { return rl.At(i).Resource().Attributes() })
+		default:
+			t.Errorf("unrecognised line: %s", l)
+		}
+	}
+}
+
+// TestRelay_StampsAfterTheStripList: a stamp is the last word on its key, so even a key the strip
+// list drops is set; and a value the scrubber would drop is not what it stamps over.
+func TestRelay_StampsAfterTheStripList(t *testing.T) {
+	dir := t.TempDir()
+	r, stop := start(t, Config{Dir: dir, ResourceAttrs: map[string]string{"ynh.session.id": "s"}})
+	tb := traceBody(t)
+	post(t, r.Endpoint()+"/v1/traces", "application/x-protobuf", tb, false)
+	stop()
+	if l := spoolLines(t, dir); len(l) != 1 || !strings.Contains(l[0], `"ynh.session.id"`) || strings.Contains(l[0], "user.email") {
+		t.Errorf("lines = %v", l)
+	}
+	if s := r.Stats(); s.Stripped != 0 {
+		t.Errorf("stamping counted as stripping: %+v", s)
+	}
+}
+
+func TestNew_RefusesEmptyResourceAttr(t *testing.T) {
+	for _, m := range []map[string]string{{"": "v"}, {"ynh.session.id": ""}} {
+		if _, err := New(Config{Dir: t.TempDir(), ResourceAttrs: m}); err == nil {
+			t.Errorf("accepted %v", m)
+		}
+	}
+}
+
+func TestNew_RefusesStripListedResourceAttr(t *testing.T) {
+	for _, k := range Stripped {
+		if _, err := New(Config{Dir: t.TempDir(), ResourceAttrs: map[string]string{k: "v"}}); err == nil {
+			t.Errorf("accepted the strip-listed key %q", k)
+		}
 	}
 }

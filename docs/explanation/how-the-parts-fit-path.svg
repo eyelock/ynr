@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 1116" width="520" height="1116" role="img" aria-labelledby="title desc">
+  <title id="title">How a record travels through ynr</title>
+  <desc id="desc">Tools write OTLP JSON lines into the spool: ynh agent run and ynf with the Go spoolexporter module, ynm with the npm package @eyelock/otel-spool-exporter. Vendor CLIs that can only export over the network, Claude Code and Codex, send OTLP/HTTP to ynr relay on loopback, which strips private attributes (ADR-006 rule 10) and writes spool files. The spool has a folder per writer: local/, runs/&lt;run id&gt;/, factory/ and services/&lt;service&gt;/, and the folder sets ynr.provenance. ynr serve reads the spool, stamps provenance and ships compressed batches to the store, and can also forward to any OTLP/HTTP endpoint with --upstream. The store is a folder on a laptop and S3 remotely; it holds batches, then Parquet parts, an item index and rollups. The readers are ynr serve's own dashboard and ynr query on a laptop, and ynr central over a shared bucket. Collectors never talk to central. Telemetry flows one way: observation, never control.</desc>
+
+  <style>
+    svg { --bg:#ffffff; --box:#f4f6f9; --chip:#ffffff; --line:#8a94a6; --text:#1f2328; --muted:#57606a; --accent:#0066cc; }
+    @media (prefers-color-scheme: dark) {
+      svg { --bg:#0d1117; --box:#161b22; --chip:#0d1117; --line:#6e7681; --text:#e6edf3; --muted:#9198a1; --accent:#58a6ff; }
+    }
+    .bg { fill: var(--bg); }
+    .box { fill: var(--box); stroke: var(--line); stroke-width: 1.2; }
+    .chip { fill: var(--chip); stroke: var(--line); stroke-width: 1; }
+    .dash { fill: var(--box); stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 5 4; }
+    .band { fill: none; stroke: var(--accent); stroke-width: 1.5; }
+    .rule { stroke: var(--line); stroke-width: 1; }
+    text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; fill: var(--text); }
+    .t { font-size: 16px; font-weight: 600; }
+    .b { font-size: 15px; }
+    .m { font-size: 14px; fill: var(--muted); }
+    .c { font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 13.5px; }
+    .h { font-size: 16px; font-weight: 600; fill: var(--accent); }
+    .arrow { stroke: var(--text); stroke-width: 1.6; fill: none; marker-end: url(#tip); }
+    .arrow2 { stroke: var(--text); stroke-width: 1.6; fill: none; marker-end: url(#tip); marker-start: url(#tail); }
+    .darrow { stroke: var(--muted); stroke-width: 1.6; fill: none; stroke-dasharray: 5 4; marker-end: url(#tipm); }
+    #tip path { fill: var(--text); } #tail path { fill: var(--text); } #tipm path { fill: var(--muted); }
+  </style>
+  <defs>
+    <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="tail" viewBox="0 0 10 10" refX="1" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="tipm" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto"><path d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="520" height="1116" rx="8"/>
+  <rect class="box" x="20" y="20" width="235" height="150" rx="6"/>
+  <text class="t" x="32" y="46">Tools</text>
+  <text class="b" x="32" y="66">ynh agent run, ynf</text>
+  <text class="m" x="32" y="86">Go module spoolexporter</text>
+  <text class="b" x="32" y="106">ynm</text>
+  <text class="m" x="32" y="126">npm package</text>
+  <text class="m" x="32" y="146">@eyelock/otel-spool-exporter</text>
+  <rect class="box" x="265" y="20" width="235" height="150" rx="6"/>
+  <text class="t" x="277" y="46">Vendor CLIs</text>
+  <text class="b" x="277" y="66">Claude Code, Codex</text>
+  <text class="m" x="277" y="86">can only export OTLP</text>
+  <text class="m" x="277" y="106">over the network</text>
+  <path class="arrow" d="M382.5,170 L382.5,198"/>
+  <rect class="box" x="265" y="200" width="235" height="110" rx="6"/>
+  <text class="t" x="277" y="226">ynr relay</text>
+  <text class="b" x="277" y="246">OTLP/HTTP on loopback</text>
+  <text class="m" x="277" y="266">strips private attributes</text>
+  <text class="m" x="277" y="286">(ADR-006 rule 10)</text>
+  <path class="arrow" d="M137.5,170 L137.5,338"/>
+  <text class="m" x="147.5" y="240">writes OTLP</text>
+  <text class="m" x="147.5" y="260">JSON lines</text>
+  <path class="arrow" d="M382.5,310 L382.5,338"/>
+  <rect class="box" x="20" y="340" width="480" height="236" rx="6"/>
+  <text class="t" x="32" y="366">Spool: the one contract</text>
+  <text class="m" x="32" y="386">a folder for each writer, which sets ynr.provenance</text>
+  <rect class="chip" x="32" y="404" width="456" height="34" rx="6"/>
+  <text class="c" x="44" y="426">local/</text>
+  <text class="m" x="476" y="426" text-anchor="end">provenance local</text>
+  <rect class="chip" x="32" y="446" width="456" height="34" rx="6"/>
+  <text class="c" x="44" y="468">runs/&lt;run id&gt;/</text>
+  <text class="m" x="476" y="468" text-anchor="end">provenance run</text>
+  <rect class="chip" x="32" y="488" width="456" height="34" rx="6"/>
+  <text class="c" x="44" y="510">factory/</text>
+  <text class="m" x="476" y="510" text-anchor="end">provenance factory</text>
+  <rect class="chip" x="32" y="530" width="456" height="34" rx="6"/>
+  <text class="c" x="44" y="552">services/&lt;service&gt;/</text>
+  <text class="m" x="476" y="552" text-anchor="end">provenance service</text>
+  <path class="arrow" d="M137.5,576 L137.5,604"/>
+  <rect class="box" x="20" y="606" width="300" height="110" rx="6"/>
+  <text class="t" x="32" y="632">ynr serve</text>
+  <text class="b" x="32" y="652">reads the spool, stamps</text>
+  <text class="b" x="32" y="672">provenance, ships compressed</text>
+  <text class="b" x="32" y="692">batches to the store</text>
+  <rect class="dash" x="340" y="621" width="160" height="80" rx="6"/>
+  <text class="b" x="352" y="647">any OTLP/HTTP</text>
+  <text class="b" x="352" y="667">endpoint</text>
+  <text class="m" x="352" y="687">--upstream, optional</text>
+  <path class="darrow" d="M320,661 L338,661"/>
+  <path class="arrow" d="M137.5,716 L137.5,744"/>
+  <rect class="box" x="20" y="746" width="480" height="150" rx="6"/>
+  <text class="t" x="32" y="772">Store</text>
+  <text class="b" x="32" y="800">On a laptop</text>
+  <text class="m" x="32" y="820">a folder, file://</text>
+  <text class="b" x="265" y="800">Remotely</text>
+  <text class="m" x="265" y="820">S3, s3://&lt;bucket&gt;</text>
+  <path class="rule" d="M253,784 L253,830"/>
+  <text class="m" x="32" y="856">holds batches (.jsonl.gz), then Parquet parts,</text>
+  <text class="m" x="32" y="876">an item index, and daily and monthly rollups</text>
+  <path class="arrow" d="M137.5,896 L137.5,924"/>
+  <path class="arrow" d="M382.5,896 L382.5,924"/>
+  <rect class="box" x="20" y="926" width="235" height="90" rx="6"/>
+  <text class="t" x="32" y="952">Reader on a laptop</text>
+  <text class="b" x="32" y="972">ynr serve, full build</text>
+  <text class="m" x="32" y="992">local dashboard, ynr query</text>
+  <rect class="box" x="265" y="926" width="235" height="90" rx="6"/>
+  <text class="t" x="277" y="952">Reader remotely</text>
+  <text class="b" x="277" y="972">ynr central</text>
+  <text class="m" x="277" y="992">dashboard (sign-in), ynr query</text>
+  <text class="m" x="260.0" y="1042" text-anchor="middle">Collectors never talk to central: they write to</text>
+  <text class="m" x="260.0" y="1062" text-anchor="middle">the bucket, and central reads it.</text>
+  <rect class="band" x="20" y="1076" width="480" height="30" rx="6"/>
+  <text class="h" x="260.0" y="1096" text-anchor="middle">Telemetry flows one way: observation, never control.</text>
+</svg>

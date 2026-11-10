@@ -63,10 +63,13 @@ version       v0.2.0-14-g47b1a89 (full)
 capabilities  0.1.0
 spool         /Users/you/ynr-tutorial/state/ynr/spool
 serving       no
+relay         no
 ```
 
 `spool` is where tools write. It is under your tutorial folder because of `XDG_STATE_HOME`.
-`serving` says whether a `ynr serve` holds that spool. Nothing does yet.
+`serving` says whether a `ynr serve` holds that spool. Nothing does yet. `relay` says whether a
+standing `ynr relay` on a fixed port, such as a Wheelhouse's, writes into it. The relay you start
+in lesson 3 picks a fresh port each time, so it never shows here.
 
 ```bash
 ynr doctor
@@ -80,6 +83,7 @@ ok    otlp      no OTEL_EXPORTER_OTLP_*ENDPOINT set, so tools write to ynr's spo
 ok    path      ynr on PATH is this one: /Users/you/ynr-tutorial/bin/ynr
 warn  spool     /Users/you/ynr-tutorial/state/ynr/spool does not exist yet; ynr serve creates it, and tools write nothing until then
 warn  serve     no ynr serve holds the spool, so nothing is shipped
+ok    relay     no standing ynr relay writes into /Users/you/ynr-tutorial/state/ynr/spool/local
 ok    backlog   no spool to read
 ok    store     file:///Users/you/ynr-tutorial/data/ynr/store (0 rollup files)
 warn  queries   no hot tier answering: ynr query reads the store directly, and needs the full build
