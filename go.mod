@@ -10,7 +10,7 @@ require (
 	github.com/aws/smithy-go v1.28.8
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/duckdb/duckdb-go/v2 v2.20000.0
-	github.com/eyelock/ynr/spoolexporter v0.3.0
+	github.com/eyelock/ynr/spoolexporter v0.4.0
 	go.opentelemetry.io/collector/component v1.70.0
 	go.opentelemetry.io/collector/component/componenttest v0.164.0
 	go.opentelemetry.io/collector/confmap v1.70.0
