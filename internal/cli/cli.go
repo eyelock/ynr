@@ -110,7 +110,10 @@ Environment fallbacks: YNR_SPOOL_ROOT, YNR_STORE, YNR_UPSTREAM, YNR_COLLECTOR_ID
 YNR_COLLECTOR_INSTANCE, YNR_REGISTRY_TOOLS, YNR_ERASE and YNR_UI; for central also
 YNR_CENTRAL_STATE, YNR_CENTRAL_SOCKET (which ynr query reads too), YNR_OIDC_ISSUER,
 YNR_OIDC_CLIENT_ID, YNR_OIDC_REDIRECT_URL, YNR_ALLOW_EMAILS, YNR_ALLOW_DOMAIN, YNR_ALLOW_GROUP
-and YNR_GROUP_CLAIM; and YNR_SPOOL for the relay's folder.
+and YNR_GROUP_CLAIM; and YNR_SPOOL for the relay's folder. The relay also reads YNR_REGISTRY_TOOLS
+(default ynh) when given --resource-attr, and runs the tools named by bare name on the PATH. It is the
+same variable serve reads, but the relay refuses to start if a named tool is missing, so a value set
+for serve that names a tool absent from the PATH stops the relay.
 `
 
 // stdin is the relay's standard input, replaced in tests.
