@@ -182,7 +182,7 @@ func TestHTTPOptionsFromEnv_Unsupported(t *testing.T) {
 	const secret = "s3cret-value"
 	for name, tc := range map[string]struct{ key, val string }{
 		"grpc":             {"OTEL_EXPORTER_OTLP_PROTOCOL", "grpc"},
-		"protobuf":         {"OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "http/protobuf"},
+		"grpc per signal":  {"OTEL_EXPORTER_OTLP_TRACES_PROTOCOL", "grpc"},
 		"gzip":             {"OTEL_EXPORTER_OTLP_COMPRESSION", "gzip"},
 		"signal gzip":      {"OTEL_EXPORTER_OTLP_LOGS_COMPRESSION", "gzip"},
 		"ca":               {"OTEL_EXPORTER_OTLP_CERTIFICATE", "/etc/ca.pem"},
