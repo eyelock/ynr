@@ -751,6 +751,26 @@ func TestRelay_StampsAfterTheStripList(t *testing.T) {
 	}
 }
 
+// TestNew_RefusesStrippableResourceAttrValue: the stamp comes after the strip, so a value the strip
+// rules would drop (an email address, a path under the home folder) is refused (ynr #125).
+func TestNew_RefusesStrippableResourceAttrValue(t *testing.T) {
+	const home = "/Users/someone"
+	for _, v := range []string{"me@example.com", home, home + "/src/x"} {
+		_, err := New(Config{Dir: t.TempDir(), Home: home, ResourceAttrs: map[string]string{"ynh.session.id": v}})
+		if err == nil || !strings.Contains(err.Error(), "email address or a path") {
+			t.Errorf("%q: err = %v", v, err)
+		}
+	}
+	for _, v := range []string{"sess-1", "a@b", "/Users/someoneelse/x", "/tmp/x"} {
+		r, err := New(Config{Dir: t.TempDir(), Home: home, ResourceAttrs: map[string]string{"ynh.session.id": v}})
+		if err != nil {
+			t.Errorf("%q refused: %v", v, err)
+			continue
+		}
+		_ = r.ln.Close()
+	}
+}
+
 func TestNew_RefusesEmptyResourceAttr(t *testing.T) {
 	for _, m := range []map[string]string{{"": "v"}, {"ynh.session.id": ""}} {
 		if _, err := New(Config{Dir: t.TempDir(), ResourceAttrs: m}); err == nil {
