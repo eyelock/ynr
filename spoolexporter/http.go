@@ -30,6 +30,11 @@ type HTTPOptions struct {
 	TracesHeaders  map[string]string
 	LogsHeaders    map[string]string
 	MetricsHeaders map[string]string
+	// TracesProtocol, LogsProtocol and MetricsProtocol choose the body each
+	// signal is sent as. The zero value is ProtocolJSON.
+	TracesProtocol  Protocol
+	LogsProtocol    Protocol
+	MetricsProtocol Protocol
 	// Timeout bounds each export. Zero takes DefaultHTTPTimeout.
 	Timeout time.Duration
 	// Client sends the requests. Nil takes a client that follows no
@@ -38,7 +43,18 @@ type HTTPOptions struct {
 	Client *http.Client
 }
 
-// HTTPSender posts OTLP/JSON export requests to an operator's OTLP/HTTP
+// Protocol is the encoding of an OTLP/HTTP request body, named as
+// OTEL_EXPORTER_OTLP_PROTOCOL names it. The zero value is ProtocolJSON.
+type Protocol string
+
+const (
+	// ProtocolJSON sends application/json bodies.
+	ProtocolJSON Protocol = "http/json"
+	// ProtocolProtobuf sends application/x-protobuf bodies.
+	ProtocolProtobuf Protocol = "http/protobuf"
+)
+
+// HTTPSender posts OTLP export requests to an operator's OTLP/HTTP
 // endpoints. It is safe for concurrent use, so one HTTPSender serves the
 // trace, log and metric exporters. Like the Writer it never fails: an export
 // that cannot be sent is counted in Stats. Each export is bounded by the
@@ -75,23 +91,33 @@ func (h *HTTPSender) drop(records int) { h.dropped.Add(int64(records)) }
 // sync does nothing: every export is sent before it returns.
 func (h *HTTPSender) sync() {}
 
-func (h *HTTPSender) target(sig signal) (string, map[string]string) {
+func (h *HTTPSender) target(sig signal) (string, map[string]string, Protocol) {
 	switch sig {
 	case signalTraces:
-		return h.opts.TracesEndpoint, h.opts.TracesHeaders
+		return h.opts.TracesEndpoint, h.opts.TracesHeaders, h.opts.TracesProtocol
 	case signalLogs:
-		return h.opts.LogsEndpoint, h.opts.LogsHeaders
+		return h.opts.LogsEndpoint, h.opts.LogsHeaders, h.opts.LogsProtocol
 	default:
-		return h.opts.MetricsEndpoint, h.opts.MetricsHeaders
+		return h.opts.MetricsEndpoint, h.opts.MetricsHeaders, h.opts.MetricsProtocol
 	}
 }
 
 func (h *HTTPSender) send(ctx context.Context, sig signal, req any, records int) {
-	endpoint, headers := h.target(sig)
+	endpoint, headers, protocol := h.target(sig)
 	if endpoint == "" {
 		return
 	}
-	body, err := json.Marshal(req)
+	var (
+		body        []byte
+		err         error
+		contentType = "application/json"
+	)
+	if protocol == ProtocolProtobuf {
+		contentType = "application/x-protobuf"
+		body, err = encodeProtobuf(req)
+	} else {
+		body, err = json.Marshal(req)
+	}
 	if err != nil {
 		h.fail(records)
 		return
@@ -109,7 +135,7 @@ func (h *HTTPSender) send(ctx context.Context, sig signal, req any, records int)
 	for k, v := range headers {
 		r.Header.Set(k, v)
 	}
-	r.Header.Set("Content-Type", "application/json")
+	r.Header.Set("Content-Type", contentType)
 	resp, err := h.opts.Client.Do(r)
 	if err != nil {
 		h.fail(records)
@@ -134,8 +160,6 @@ func (h *HTTPSender) fail(records int) {
 // OTEL_EXPORTER_OTLP_ or to OTEL_EXPORTER_OTLP_{TRACES,LOGS,METRICS}_.
 const (
 	envPrefix = "OTEL_EXPORTER_OTLP_"
-	// jsonProtocol is the only protocol the sender speaks.
-	jsonProtocol = "http/json"
 )
 
 // HTTPOptionsFromEnv reads the operator's OTEL_EXPORTER_OTLP_* settings
@@ -145,7 +169,7 @@ const (
 // operator asked for nothing, and the caller exports nowhere extra.
 //
 // unsupported is not empty when a setting asks for something the sender
-// cannot do: a protocol other than http/json, a custom CA or client
+// cannot do: a protocol other than http/json or http/protobuf, a custom CA or client
 // certificate, or compression. It names the setting and never its value, in
 // a form fit to print once, and the caller should then send nothing. When it
 // is set the other results are unspecified.
@@ -171,9 +195,24 @@ func HTTPOptionsFromEnv(getenv func(string) string) (opts HTTPOptions, configure
 			return opts, false, name + " is set: custom certificates are not supported"
 		}
 	}
-	for _, name := range append([]string{envPrefix + "PROTOCOL"}, perSignal(signals, "PROTOCOL")...) {
-		if v := strings.TrimSpace(getenv(name)); v != "" && !strings.EqualFold(v, jsonProtocol) {
-			return opts, false, name + " is not " + jsonProtocol + ": only OTLP/HTTP with JSON bodies is supported"
+	// The protocol: the per-signal setting overrides the general one. An
+	// unset protocol is http/json.
+	protos := [3]*Protocol{&opts.TracesProtocol, &opts.LogsProtocol, &opts.MetricsProtocol}
+	for i, sig := range signals {
+		p, name := Protocol(""), ""
+		for _, n := range []string{envPrefix + sig + "_PROTOCOL", envPrefix + "PROTOCOL"} {
+			if v := strings.TrimSpace(getenv(n)); v != "" {
+				p, name = Protocol(strings.ToLower(v)), n
+				break
+			}
+		}
+		switch p {
+		case "", ProtocolJSON:
+			*protos[i] = ProtocolJSON
+		case ProtocolProtobuf:
+			*protos[i] = ProtocolProtobuf
+		default:
+			return opts, false, name + " is not http/json or http/protobuf: only OTLP/HTTP is supported"
 		}
 	}
 
