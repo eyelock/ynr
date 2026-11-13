@@ -13,7 +13,9 @@ import (
 
 // Stripped names the attributes the relay always drops, wherever they appear: a person's email
 // address and full name, the working directory, and the host and process attributes that name
-// the machine or the user on it. A vendor
+// the machine or the user on it, and the tool details (tool_input, tool_parameters) Claude Code adds
+// under OTEL_LOG_TOOL_DETAILS=1: commands, file paths and arguments, so no part of them may reach
+// the spool (ADR-006 rule 10). A vendor
 // CLI sends them and not every vendor can be told not to (Codex sends cwd and host.name), so the
 // relay enforces ADR-006's "no content" rule for them at one point, for every vendor.
 var Stripped = []string{
@@ -29,6 +31,8 @@ var Stripped = []string{
 	"process.command_line",
 	"process.command_args",
 	"process.executable.path",
+	"tool_input",
+	"tool_parameters",
 }
 
 // email matches a value that is an email address and nothing else. Only a whole value counts, so a
