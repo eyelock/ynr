@@ -141,7 +141,7 @@ and `YNR_SESSION_SECRET`. See [Sign-in (OIDC)](sign-in.md).
 ```
 ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
           [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
-          [--resource-attr <key=value>]... [--registry-tools ynh] [--exit-on-stdin-eof]
+          [--resource-attr <key=value>]... [--registry-tools ynh] [--key-file <path>] [--exit-on-stdin-eof]
 ```
 
 Prints its OTLP/HTTP endpoint as its first line of output, then runs until stopped (Ctrl-C,
@@ -158,6 +158,7 @@ exit it prints a line on stderr counting what it accepted, refused and stripped.
 | `--rate` | `100` | Requests accepted a second, sustained (burst 200). |
 | `--resource-attr` | none | `key=value`, repeatable. Sets the attribute on the resource of every span, metric and log record the relay writes, replacing a value the vendor sent for the same key. The key must be an attribute a `--registry-tools` registry declares, such as `ynh.session.id`; any other key, a key on the strip list, an empty value, an unreadable registry, or a registry that lists an attribute outside its own tool's prefix is refused at start-up. |
 | `--registry-tools` | `ynh` | The tools whose registries say which `--resource-attr` keys are allowed, each run by bare name on `PATH` as `<tool> telemetry registry --format json`. Read only when `--resource-attr` is given. `YNR_REGISTRY_TOOLS`. |
+| `--key-file` | none | The file holding the key that hashes account ids (below): 32 bytes, raw or as 64 hex characters, mode `0600`. A file that group or others can read, that lies under the spool folder or root, that is not a regular file, or that is the wrong size is refused at start-up. `YNR_RELAY_KEY_FILE`. The key's value is never taken from the environment. |
 | `--exit-on-stdin-eof` | off | Also stops when standard input closes, so the relay ends with the process that started it. |
 
 It accepts OTLP/HTTP, protobuf or JSON, optionally gzipped, on `/v1/traces`, `/v1/metrics` and
@@ -191,10 +192,19 @@ the scope, a span, a span event or link, a data point or exemplar, or a log reco
 
 A list holding such a value is dropped whole; inside a map value, just the offending keys go.
 `user.name`, which ADR-002 uses for a person's host-qualified handle, is kept until ADR-006
-settles it. Account ids such as `user.id` are kept raw until the relay hashes them (ADR-006
-rule 10).
+settles it.
 
-They are dropped, not hashed. The count is the `attributes stripped` figure in the exit line. Only
+Account ids, `user.id`, `user.account_uuid`, `user.account_id` and `organization.id`, are never
+kept raw (ADR-006 rule 10). With `--key-file` the relay replaces each, wherever it appears, by
+`<key id>:<hex HMAC-SHA-256 of the id under the key>`: the same id and key always give the same
+value, so an account groups together across records and relay restarts, and the value cannot be
+read back. The key id is 8 hex characters derived one way from the key, so a reader can tell which
+key made a value. The key is never written to the spool, a log, the exit line or `ynr info`. With
+no key, as in a per-run relay, the relay drops the four attributes and counts them as stripped.
+Losing or changing the key breaks the grouping across the change: an account before and after
+counts as two, nothing older is exposed, and two Wheelhouses with different keys cannot be linked.
+
+The other attributes are dropped, not hashed. The count is the `attributes stripped` figure in the exit line. Only
 attributes are scrubbed, not a log record's body or a span's name.
 
 `--resource-attr` runs after that, so it has the last word on its keys. A relay belongs to one
