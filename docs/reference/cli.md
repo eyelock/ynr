@@ -170,8 +170,11 @@ holds that folder. When the port is taken it says so, naming the relay that hold
 writes into the same folder. A relay on port `0`, such as a run's, records nothing.
 
 The default limits fit many seats at once. A Claude Code process sends well under one request a
-second, and a test sends 160 requests from 40 senders at one instant through one relay without a
-refusal. Against `--max-memory`, an uncompressed request of known length counts its own length;
+second, and a test sends 160 requests from 40 senders, one connection each, at one instant through one relay
+without a refusal. The operating system's listen queue bounds how many new connections can arrive in
+the same instant (128 on macOS, `kern.ipc.somaxconn`); the relay accepts as fast as Go does, and a
+burst above the queue is reset by the kernel before the relay sees it, so an exporter should keep
+its connection open and retry a refused connect, as OTLP exporters do. Against `--max-memory`, an uncompressed request of known length counts its own length;
 a gzipped or chunked one counts the full `--max-request`, so 16 of those at most are read at
 once at the defaults, and more are refused with `503` and `Retry-After`.
 
