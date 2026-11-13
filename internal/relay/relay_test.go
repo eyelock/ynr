@@ -275,6 +275,21 @@ func TestNew_Refuses(t *testing.T) {
 	}
 }
 
+// TestNew_RefusesResourceAttrOnStandingRelay: a relay on a fixed port serves many launches, so it
+// cannot stamp one launch's attribute on all of them (ADR-004, ynr #119); one on port 0 can.
+func TestNew_RefusesResourceAttrOnStandingRelay(t *testing.T) {
+	attrs := map[string]string{"ynh.session.id": "s"}
+	_, err := New(Config{Dir: t.TempDir(), Listen: freePort(t), ResourceAttrs: attrs})
+	if err == nil || !strings.Contains(err.Error(), "per-launch relay") {
+		t.Errorf("standing relay with a resource attribute: err = %v", err)
+	}
+	if r, err := New(Config{Dir: t.TempDir(), ResourceAttrs: attrs}); err != nil {
+		t.Errorf("per-launch relay refused: %v", err)
+	} else {
+		_ = r.ln.Close()
+	}
+}
+
 // TestRelay_IdleConnectionDoesNotHoldShutdown: a connection opened but never used must not make
 // a stop look like a loss.
 func TestRelay_IdleConnectionDoesNotHoldShutdown(t *testing.T) {

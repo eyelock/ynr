@@ -366,6 +366,7 @@ func fakeYnh(t *testing.T, attrs ...string) {
 func TestRelayResourceAttrRefusals(t *testing.T) {
 	fakeYnh(t, "ynh.session.id")
 	cases := map[string][]string{
+		"standing":    {"relay", "--spool", t.TempDir(), "--listen", "127.0.0.1:47831", "--resource-attr", "ynh.session.id=x"},
 		"undeclared":  {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.other=x"},
 		"standard":    {"relay", "--spool", t.TempDir(), "--resource-attr", "service.name=x"},
 		"no tool":     {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.session.id=x", "--registry-tools", "ynr-no-such-tool"},
@@ -377,6 +378,9 @@ func TestRelayResourceAttrRefusals(t *testing.T) {
 		var out, errb bytes.Buffer
 		if code := Run(context.Background(), args, &out, &errb); code == ExitOK {
 			t.Errorf("%s: exit 0, stderr %q", name, errb.String())
+		}
+		if name == "standing" && !strings.Contains(errb.String(), "per-launch relay") {
+			t.Errorf("standing: stderr %q does not say only a per-launch relay stamps", errb.String())
 		}
 		if out.Len() != 0 {
 			t.Errorf("%s: printed an endpoint: %q", name, out.String())

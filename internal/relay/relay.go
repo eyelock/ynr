@@ -71,6 +71,20 @@ type Config struct {
 	ResourceAttrs map[string]string
 }
 
+// Standing reports whether a relay listening on listen is a standing relay: any fixed port. Port 0
+// picks a free one, which makes a per-launch relay.
+func Standing(listen string) bool {
+	_, port, _ := net.SplitHostPort(listen)
+	return port != "0"
+}
+
+// ErrStandingResourceAttr is the refusal of resource attributes on a standing relay: it serves
+// many launches and cannot know which one a record belongs to, so only a per-launch relay may
+// stamp (ADR-004).
+func ErrStandingResourceAttr(listen string) error {
+	return fmt.Errorf("relay: resource attributes are for a per-launch relay (--listen port 0): a standing relay on %s serves many launches and cannot know which one a record belongs to (ADR-004)", listen)
+}
+
 // Stats counts what the relay did with the requests it received.
 type Stats struct {
 	Accepted  int64 // requests written to the spool
@@ -132,6 +146,9 @@ func New(cfg Config) (*Relay, error) {
 	if err := loopback(cfg.Listen); err != nil {
 		return nil, err
 	}
+	if len(cfg.ResourceAttrs) > 0 && Standing(cfg.Listen) {
+		return nil, ErrStandingResourceAttr(cfg.Listen)
+	}
 	for k, v := range cfg.ResourceAttrs {
 		if k == "" || v == "" {
 			return nil, fmt.Errorf("relay: resource attribute %q=%q: key and value must not be empty", k, v)
@@ -162,7 +179,7 @@ func New(cfg Config) (*Relay, error) {
 		return nil, fmt.Errorf("relay: listening: %w", err)
 	}
 	var lock *spool.Lock
-	if _, port, _ := net.SplitHostPort(cfg.Listen); port != "0" {
+	if Standing(cfg.Listen) {
 		lock, err = spool.AcquireRelay(cfg.Dir, spool.RelayInfo{
 			PID: os.Getpid(), Since: time.Now().UTC().Truncate(time.Second), Endpoint: "http://" + ln.Addr().String(),
 		})

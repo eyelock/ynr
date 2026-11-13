@@ -423,6 +423,10 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		_, _ = fmt.Fprintln(stderr, "ynr: --max-request, --max-memory and --rate must be positive")
 		return ExitConfig
 	}
+	if len(attrs) > 0 && relay.Standing(*listen) {
+		_, _ = fmt.Fprintf(stderr, "ynr: --resource-attr: %v\n", relay.ErrStandingResourceAttr(*listen))
+		return ExitConfig
+	}
 	if len(attrs) > 0 {
 		declared, err := registry.Declared(ctx, splitList(*relayTools))
 		if err != nil {
