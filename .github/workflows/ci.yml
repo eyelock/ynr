@@ -9,9 +9,14 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
-  # Only a superseded pull request run is cancelled. A push to main or develop, and a merge queue
-  # run, always finishes: cancelling it by the next merge hid a red develop until too late.
+  # A push to main or develop gets a group of its own, keyed on the commit, so no push run is
+  # replaced: GitHub keeps one waiting run per group, and a shared group let a third quick merge
+  # replace the second's run before it started, hiding a red develop. A pull request run, and a
+  # merge queue run on its own gh-readonly-queue ref, share the ref's group, and a newer
+  # pull-request run cancels the older one.
+  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
+  # A run that has started on develop or main, and a merge queue run, always finishes: cancelling
+  # it by the next merge hid a red develop until too late.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
