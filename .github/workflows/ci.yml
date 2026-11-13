@@ -14,7 +14,7 @@ concurrency:
   # replace the second's run before it started, hiding a red develop. A pull request run, and a
   # merge queue run on its own gh-readonly-queue ref, share the ref's group, and a newer
   # pull-request run cancels the older one.
-  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
   # A run that has started on develop or main, and a merge queue run, always finishes: cancelling
   # it by the next merge hid a red develop until too late.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
