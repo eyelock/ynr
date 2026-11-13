@@ -269,6 +269,25 @@ func TestQueryUsageNamesItsFlags(t *testing.T) {
 	}
 }
 
+// `ynr query` and `ynr query --help` list every flag the query command takes, so the listing
+// cannot drift from the flags the code defines (ynr #123).
+func TestQueryHelpListsEveryFlag(t *testing.T) {
+	_, _, flagHelp := run("query", "runs", "-h")
+	flagLine := regexp.MustCompile(`(?m)^\s+-([a-z][a-z-]*)`)
+	found := flagLine.FindAllStringSubmatch(flagHelp, -1)
+	if len(found) == 0 {
+		t.Fatalf("ynr query runs -h listed no flags:\n%s", flagHelp)
+	}
+	for _, args := range [][]string{{"query"}, {"query", "--help"}, {"query", "-h"}} {
+		_, out, _ := run(args...)
+		for _, m := range found {
+			if !strings.Contains(out, "--"+m[1]) {
+				t.Errorf("ynr %s does not list --%s", strings.Join(args, " "), m[1])
+			}
+		}
+	}
+}
+
 // TestCollectorIDForAnyHost: every hostname gives an id the collector accepts, and two long ones
 // sharing a start stay apart. A CI runner's hostname is often longer than an id may be.
 func TestCollectorIDForAnyHost(t *testing.T) {
