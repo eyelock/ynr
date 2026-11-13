@@ -40,7 +40,11 @@ It is the only contract between a tool and ynr.
   exporters that know nothing of ynr's roles. Neither has gRPC or protobuf. (Amended
   2026-11-01: the Go module also has an OTLP/HTTP JSON exporter, using only `net/http`, so a tool
   can post the same OTLP/JSON to an operator's `OTEL_EXPORTER_OTLP_*` endpoint beside the spool.
-  The npm package does not, yet.) The
+  The npm package does not, yet.) (Amended
+  2026-11-13: the Go module's exporter also sends `http/protobuf`, chosen by
+  `OTEL_EXPORTER_OTLP_PROTOCOL`, with an encoder built on `protowire` from
+  `google.golang.org/protobuf`; it still has no gRPC, and a consumer links only that one
+  module. The design is bead ynw-egnq, built in ynw-20p5.) The
   spool format and both ends of it live in one repository, and every tool uses them (NFR-8).
 
 **Reading.** `ynr serve` reads every writer folder with ynr's own spool receiver, including open
