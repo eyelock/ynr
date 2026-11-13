@@ -41,7 +41,8 @@ var email = regexp.MustCompile(`^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+
 // holding such a path is dropped whole.
 type scrubber struct {
 	names map[string]bool
-	home  string // cleaned, without a trailing separator; empty when unknown or the root
+	home  string  // cleaned, without a trailing separator; empty when unknown or the root
+	hash  *hasher // nil without a key: the account ids are then dropped
 }
 
 func newScrubber(home string) *scrubber {
@@ -65,6 +66,14 @@ func (s *scrubber) underHome(v string) bool {
 	return v == s.home || strings.HasPrefix(v, s.home+string(filepath.Separator))
 }
 
+var accountID = func() map[string]bool {
+	m := make(map[string]bool, len(AccountIDs))
+	for _, k := range AccountIDs {
+		m[k] = true
+	}
+	return m
+}()
+
 // attrs scrubs m in place and returns how many attributes it dropped.
 func (s *scrubber) attrs(m pcommon.Map) int {
 	n := 0
@@ -72,6 +81,14 @@ func (s *scrubber) attrs(m pcommon.Map) int {
 		if s.names[k] || s.drop(v, &n) {
 			n++
 			return true
+		}
+		if accountID[k] {
+			// Fail closed: with no key, or nothing to hash, the id goes.
+			if s.hash == nil || v.AsString() == "" {
+				n++
+				return true
+			}
+			v.SetStr(s.hash.hash(v.AsString()))
 		}
 		return false
 	})
