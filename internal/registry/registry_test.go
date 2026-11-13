@@ -122,6 +122,48 @@ func regJSON(tool, version string) string {
 	return string(b)
 }
 
+// A locally built tool reports a version with SemVer build metadata (ynr #126); it is learned, and a
+// malformed one is still refused, naming the tool and the version.
+func TestAskAcceptsBuildMetadata(t *testing.T) {
+	ctx := context.Background()
+	for name, version := range map[string]string{"ynplain": "0.3.0", "ynmeta": "0.3.0+1d16688", "ynmeta2": "1.2.3-rc.1+build.5"} {
+		fakeTool(t, name, regJSON(name, version))
+		l, err := Ask(ctx, name)
+		if err != nil || l.Registry.Version != version {
+			t.Errorf("%s %q: %v", name, version, err)
+		}
+	}
+	for name, version := range map[string]string{"ynbad1": "0.3.0+", "ynbad2": "0.3.0+a+b", "ynbad3": "0.3.0+a/b", "ynbad4": "+abc"} {
+		fakeTool(t, name, regJSON(name, version))
+		_, err := Ask(ctx, name)
+		if err == nil || !strings.Contains(err.Error(), name) || !strings.Contains(err.Error(), version) {
+			t.Errorf("%s %q: %v", name, version, err)
+		}
+	}
+}
+
+// The registry of a tool whose version carries build metadata is stored, under a key without it,
+// with the full version kept in the object (ynr #126).
+func TestLearnToolsStoresBuildMetadataVersion(t *testing.T) {
+	fakeTool(t, "ynf", regJSON("ynf", "0.3.0+1d16688"))
+	st, err := store.Open(store.FolderURL(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	c, problems := LearnTools(ctx, []string{"ynf"}, st, "gha-eyelock")
+	if len(problems) != 0 || c == nil || strings.Join(c.Tools(), ",") != "ynf 0.3.0+1d16688" {
+		t.Fatalf("%v %v", c, problems)
+	}
+	keys, _ := st.(store.Reader).List(ctx, "registries/gha-eyelock/ynf/0.3.0/")
+	if len(keys) != 1 {
+		t.Fatalf("keys %v", keys)
+	}
+	if b, _ := st.(store.Reader).Get(ctx, keys[0]); string(b) != regJSON("ynf", "0.3.0+1d16688") {
+		t.Errorf("object %q", b)
+	}
+}
+
 func TestAskRefusals(t *testing.T) {
 	ctx := context.Background()
 	// A name with a path in it is never run, even when it would work.

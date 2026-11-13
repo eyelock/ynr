@@ -1,11 +1,13 @@
 // Package spoolexporter is an OpenTelemetry exporter that writes traces,
 // metrics and logs as OTLP JSON lines into a spool folder, where a separate
-// reader collects them. It can also post the same OTLP/JSON to an operator's
-// OTLP/HTTP endpoint (see "Sending to an operator's endpoint").
+// reader collects them. It can also post the same data, as OTLP/JSON or OTLP
+// protobuf, to an operator's OTLP/HTTP endpoint (see "Sending to an operator's
+// endpoint").
 //
-// It imports nothing but the standard library and the OpenTelemetry SDK: the
-// network exporter is net/http, with no gRPC and no protobuf. It knows
-// nothing of the program using it or of the reader.
+// It imports nothing but the standard library, the OpenTelemetry SDK and
+// protowire, the protobuf wire encoder of google.golang.org/protobuf: the
+// network exporter is net/http, with no gRPC and no generated protobuf types.
+// It knows nothing of the program using it or of the reader.
 //
 // # Format
 //
@@ -57,9 +59,10 @@
 // # Sending to an operator's endpoint
 //
 // A tool that must also export to the endpoint an operator names in
-// OTEL_EXPORTER_OTLP_* uses an HTTPSender, which posts the same OTLP/JSON
-// over OTLP/HTTP, and the HTTP exporters beside the spool ones. It adds no
-// module: it is net/http and the encoder above.
+// OTEL_EXPORTER_OTLP_* uses an HTTPSender, which posts the same requests over
+// OTLP/HTTP, as JSON or as protobuf, and the HTTP exporters beside the spool
+// ones. It is net/http, the encoders above and, for protobuf, protowire from
+// google.golang.org/protobuf: it links no gRPC and no generated message types.
 //
 //	opts, configured, unsupported := spoolexporter.HTTPOptionsFromEnv(os.Getenv)
 //	if unsupported != "" {
@@ -75,7 +78,9 @@
 // METRICS}_ENDPOINT (used as given), HEADERS and the per-signal HEADERS (a
 // key=value list, values percent-decoded, the per-signal list winning), and
 // TIMEOUT in milliseconds (the longest of the general and per-signal values
-// applies to every signal). The body is application/json.
+// applies to every signal). PROTOCOL and the per-signal PROTOCOL choose the
+// body: http/json (the default; application/json) or http/protobuf
+// (application/x-protobuf), the per-signal setting winning.
 //
 // A signal with no endpoint is not sent: if only some per-signal endpoints
 // are set and there is no general OTEL_EXPORTER_OTLP_ENDPOINT, the other
@@ -83,8 +88,8 @@
 // Stats.
 //
 // It does not support, and HTTPOptionsFromEnv reports by name so the caller
-// can print one note and send nothing: a PROTOCOL other than http/json (grpc
-// and http/protobuf), a custom CA or client certificate (the *CERTIFICATE*
+// can print one note and send nothing: a PROTOCOL other than http/json or
+// http/protobuf (grpc), a custom CA or client certificate (the *CERTIFICATE*
 // and *CLIENT_KEY* settings) and compression (COMPRESSION=gzip).
 //
 // An HTTPSender holds the same promise as the Writer. Each export, and so the

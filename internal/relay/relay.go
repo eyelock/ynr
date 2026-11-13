@@ -69,6 +69,13 @@ type Config struct {
 	// passed, never content (ADR-006 rule 10). The caller checks the keys against a sibling's
 	// registry (registry.Declared); the relay stamps what it is given.
 	ResourceAttrs map[string]string
+	// KeyFile names the file holding the HMAC key for account ids (ADR-006 rule 10): 32 raw bytes
+	// or 64 hex characters, mode 0600, outside the spool. With it the relay replaces user.id,
+	// user.account_uuid, user.account_id and organization.id by "<key id>:<hex HMAC-SHA-256>";
+	// without it, it drops them. The key is never written, logged or printed.
+	KeyFile string
+	// SpoolRoot, when set, is also refused as a home for KeyFile, beside Dir.
+	SpoolRoot string
 }
 
 // Standing reports whether a relay listening on listen is a standing relay: any fixed port. Port 0
@@ -157,6 +164,14 @@ func New(cfg Config) (*Relay, error) {
 			return nil, fmt.Errorf("relay: resource attribute %q is on the strip list (it names a person or the machine) and cannot be stamped", k)
 		}
 	}
+	var hash *hasher
+	if cfg.KeyFile != "" {
+		key, err := readKeyFile(cfg.KeyFile, cfg.Dir, cfg.SpoolRoot)
+		if err != nil {
+			return nil, err
+		}
+		hash = newHasher(key)
+	}
 	fi, err := os.Lstat(cfg.Dir)
 	if err != nil {
 		return nil, fmt.Errorf("relay: spool folder: %w", err)
@@ -204,6 +219,7 @@ func New(cfg Config) (*Relay, error) {
 		limiter: rate.NewLimiter(rate.Limit(cfg.Rate), cfg.Burst),
 		scrub:   newScrubber(cfg.Home),
 	}
+	r.scrub.hash = hash
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/traces", r.handle(r.decodeTraces))
 	mux.HandleFunc("/v1/metrics", r.handle(r.decodeMetrics))

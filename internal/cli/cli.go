@@ -55,7 +55,7 @@ Usage:
              [--group-claim groups] [--session-ttl 8h]]
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
-            [--resource-attr key=value]... [--registry-tools ynh] [--exit-on-stdin-eof]
+            [--resource-attr key=value]... [--registry-tools ynh] [--key-file <path>] [--exit-on-stdin-eof]
   ynr telemetry registry [--format text|json]
   ynr conformance [--file .ynr/conformance.yaml] [--format text|json] [--timeout 60s]
             [--flush-limit 2s] [--keep]
@@ -81,7 +81,9 @@ the folder with another standing relay. --resource-attr (repeatable) sets an att
 resource of every record the relay writes, over a vendor's value; its key must be one a
 --registry-tools registry declares (default ynh), such as ynh.session.id, or the relay refuses to start.
 --resource-attr is for a per-launch relay only: a standing relay (a fixed --listen port) refuses it,
-so use --listen port 0, the default.
+so use --listen port 0, the default. --key-file (or YNR_RELAY_KEY_FILE) names the
+file holding the key that HMAC-hashes account ids (user.id, user.account_uuid, user.account_id,
+organization.id); with none, the relay drops them.
 
 ynr conformance runs the scenarios in a tool's conformance file against a temporary spool and a
 local test endpoint, and checks the instrumentation contract (ADR-006, ADR-008). It exits 1 if any
@@ -129,6 +131,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "version", "--version":
+		if len(args) > 1 {
+			_, _ = fmt.Fprintf(stderr, "ynr: version takes no arguments, got %q\n", args[1])
+			return ExitUsage
+		}
 		_, _ = fmt.Fprintf(stdout, "%s (%s)\n", ynr.Version, ynr.Build)
 		return ExitOK
 	case "info":
@@ -162,6 +168,17 @@ func flags(name string, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet("ynr "+name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	return fs
+}
+
+// noArgs refuses a positional argument the command does not take, naming it, so a mistyped flag
+// (`resource-attr` for `--resource-attr`) never starts the command without its effect. It reports
+// whether the command may go on.
+func noArgs(fs *flag.FlagSet, stderr io.Writer) bool {
+	if fs.NArg() == 0 {
+		return true
+	}
+	_, _ = fmt.Fprintf(stderr, "ynr: %s takes no arguments, got %q\n", strings.TrimPrefix(fs.Name(), "ynr "), fs.Arg(0))
+	return false
 }
 
 // env returns the environment fallback for a flag.
@@ -222,6 +239,9 @@ func info(args []string, stdout, stderr io.Writer) int {
 	root := fs.String("spool", defaultRoot(), "spool root")
 	format := fs.String("format", "text", "text or json")
 	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+	if !noArgs(fs, stderr) {
 		return ExitUsage
 	}
 	rep := infoReport{Version: ynr.Version, Build: ynr.Build, Capabilities: ynr.Capabilities, Spool: *root}
@@ -301,6 +321,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	ui := fs.String("ui", env("YNR_UI", ""), "serve the local dashboard on this loopback address, such as 127.0.0.1:4319 (full build only) (YNR_UI)")
 	registryTools := fs.String("registry-tools", env("YNR_REGISTRY_TOOLS", ""), "tools whose telemetry registries to learn at startup, by bare name on the PATH, comma separated, such as ynh,ynf,ynm (YNR_REGISTRY_TOOLS)")
 	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+	if !noArgs(fs, stderr) {
 		return ExitUsage
 	}
 	if *ui != "" && ynr.Build != "full" {
@@ -410,8 +433,12 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	var attrs resourceAttrs
 	fs.Var(&attrs, "resource-attr", "key=value set on the resource of every record the relay writes, overriding the vendor's; the key must be declared by a --registry-tools registry; refused on a standing relay (a fixed --listen port), so only with --listen port 0; repeatable")
 	relayTools := fs.String("registry-tools", env("YNR_REGISTRY_TOOLS", "ynh"), "tools whose telemetry registries declare the --resource-attr keys, by bare name on the PATH, comma separated (YNR_REGISTRY_TOOLS)")
+	keyFile := fs.String("key-file", os.Getenv("YNR_RELAY_KEY_FILE"), "file holding the key that hashes account ids: 32 bytes, raw or hex, mode 0600, outside the spool; without one the ids are dropped (YNR_RELAY_KEY_FILE)")
 	stdinEOF := fs.Bool("exit-on-stdin-eof", false, "also stop when standard input closes, so the relay ends with the process that started it")
 	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+	if !noArgs(fs, stderr) {
 		return ExitUsage
 	}
 	switch {
@@ -444,7 +471,7 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	}
 	r, err := relay.New(relay.Config{
 		Dir: *dir, Listen: *listen, MaxRequest: *maxRequest, MaxMemory: *maxMemory, Rate: *perSecond,
-		ResourceAttrs: attrs,
+		ResourceAttrs: attrs, KeyFile: *keyFile, SpoolRoot: defaultRoot(),
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
