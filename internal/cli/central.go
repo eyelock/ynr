@@ -91,6 +91,9 @@ func centralCmd(ctx context.Context, args []string, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return ExitUsage
 	}
+	if !noArgs(fs, stderr) {
+		return ExitUsage
+	}
 	if ynr.Build != "full" {
 		_, _ = fmt.Fprintf(stderr, "ynr: central needs the full build, which includes DuckDB; this is the %s build\n", ynr.Build)
 		return ExitConfig
