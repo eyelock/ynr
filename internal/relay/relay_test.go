@@ -751,3 +751,84 @@ func TestNew_RefusesStripListedResourceAttr(t *testing.T) {
 		}
 	}
 }
+
+// TestRelay_StripsToolDetailsKeepsSeatNames uses a fixture shaped like the probe output of Claude
+// Code 2.1.316 with OTEL_LOG_TOOL_DETAILS=1: tool_input and tool_parameters ride on log records
+// and spans (and, to be safe, resources, scopes, events, links and data points), while the seat
+// name of a desk subagent is on agent.name, agent_type and the span's subagent_type.
+func TestRelay_StripsToolDetailsKeepsSeatNames(t *testing.T) {
+	leaky := func(m pcommon.Map) {
+		m.PutStr("tool_input", `{"command":"cat /etc/hosts","file_path":"/srv/app/secret.txt"}`)
+		m.PutStr("tool_parameters", `{"bash_command":"ls","full_command":"ls -la"}`)
+		m.PutEmptyMap("tool_input.map").PutStr("command", "x") // not the stripped name: kept
+		m.PutStr("agent.name", "hannett")
+		m.PutStr("agent_type", "hannett")
+		m.PutStr("subagent_type", "hannett")
+		m.PutStr("tool_name", "Bash")
+	}
+	dir := t.TempDir()
+	r, stop := start(t, Config{Dir: dir})
+
+	td := ptrace.NewTraces()
+	rs := td.ResourceSpans().AppendEmpty()
+	leaky(rs.Resource().Attributes())
+	ss := rs.ScopeSpans().AppendEmpty()
+	leaky(ss.Scope().Attributes())
+	sp := ss.Spans().AppendEmpty()
+	sp.SetName("claude_code.tool")
+	sp.SetTraceID([16]byte{1})
+	sp.SetSpanID([8]byte{2})
+	leaky(sp.Attributes())
+	leaky(sp.Events().AppendEmpty().Attributes())
+	leaky(sp.Links().AppendEmpty().Attributes())
+	tb, _ := ptraceotlp.NewExportRequestFromTraces(td).MarshalProto()
+	if resp := post(t, r.Endpoint()+"/v1/traces", "application/x-protobuf", tb, false); resp.StatusCode != 200 {
+		t.Fatalf("traces: %d", resp.StatusCode)
+	}
+
+	md := pmetric.NewMetrics()
+	rm := md.ResourceMetrics().AppendEmpty()
+	leaky(rm.Resource().Attributes())
+	m := rm.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	m.SetName("claude_code.token.usage")
+	dp := m.SetEmptySum().DataPoints().AppendEmpty()
+	leaky(dp.Attributes())
+	leaky(dp.Exemplars().AppendEmpty().FilteredAttributes())
+	mb, _ := pmetricotlp.NewExportRequestFromMetrics(md).MarshalProto()
+	if resp := post(t, r.Endpoint()+"/v1/metrics", "application/x-protobuf", mb, false); resp.StatusCode != 200 {
+		t.Fatalf("metrics: %d", resp.StatusCode)
+	}
+
+	ld := plog.NewLogs()
+	rl := ld.ResourceLogs().AppendEmpty()
+	leaky(rl.Resource().Attributes())
+	lr := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	lr.SetEventName("claude_code.tool_result")
+	leaky(lr.Attributes())
+	lb, _ := plogotlp.NewExportRequestFromLogs(ld).MarshalProto()
+	if resp := post(t, r.Endpoint()+"/v1/logs", "application/x-protobuf", lb, false); resp.StatusCode != 200 {
+		t.Fatalf("logs: %d", resp.StatusCode)
+	}
+
+	stop()
+	lines := spoolLines(t, dir)
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3", len(lines))
+	}
+	for i, l := range lines {
+		for _, bad := range []string{`"tool_input"`, `"tool_parameters"`, "cat /etc/hosts", "secret.txt", "full_command"} {
+			if strings.Contains(l, bad) {
+				t.Errorf("line %d still carries %s: %s", i, bad, l)
+			}
+		}
+		for _, good := range []string{`"agent.name"`, `"agent_type"`, `"subagent_type"`, `"tool_name"`, `"hannett"`} {
+			if !strings.Contains(l, good) {
+				t.Errorf("line %d lost %s: %s", i, good, l)
+			}
+		}
+	}
+	// Two attributes from each of 10 leaky maps: five in the trace, three in the metrics, two in the logs.
+	if s := r.Stats(); s.Stripped != 2*10 {
+		t.Errorf("stripped = %d, want 20", s.Stripped)
+	}
+}

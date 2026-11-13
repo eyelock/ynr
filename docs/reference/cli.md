@@ -183,7 +183,9 @@ the user or a path on it (ADR-006, rule 10), wherever they appear in traces, met
 the scope, a span, a span event or link, a data point or exemplar, or a log record. It drops:
 
 - `user.email`, `user.full_name`, `cwd`, `host.name`, `host.id`, `host.ip`, `host.mac`, `process.owner`, `process.command`,
-  `process.command_line`, `process.command_args` and `process.executable.path`;
+  `process.command_line`, `process.command_args`, `process.executable.path`, and the tool details Claude Code adds under
+  `OTEL_LOG_TOOL_DETAILS=1`, `tool_input` and `tool_parameters`, dropped whole whatever their value (the seat name of a desk
+  subagent survives on `agent.name`, `agent_type` and `subagent_type`);
 - any attribute whose whole value is an email address (a sentence or URL mentioning one is kept);
 - any attribute whose value is the user's home folder or an absolute path under it.
 
