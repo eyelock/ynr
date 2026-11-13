@@ -79,7 +79,9 @@ it received into the folder. With a fixed --listen port it is a standing relay, 
 Wheelhouse's: it records itself in the folder for ynr info and ynr doctor, and refuses to share
 the folder with another standing relay. --resource-attr (repeatable) sets an attribute on the
 resource of every record the relay writes, over a vendor's value; its key must be one a
---registry-tools registry declares (default ynh), such as ynh.session.id, or the relay refuses to start. --key-file (or YNR_RELAY_KEY_FILE) names the
+--registry-tools registry declares (default ynh), such as ynh.session.id, or the relay refuses to start.
+--resource-attr is for a per-launch relay only: a standing relay (a fixed --listen port) refuses it,
+so use --listen port 0, the default. --key-file (or YNR_RELAY_KEY_FILE) names the
 file holding the key that HMAC-hashes account ids (user.id, user.account_uuid, user.account_id,
 organization.id); with none, the relay drops them.
 
@@ -429,7 +431,7 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	maxMemory := fs.Int64("max-memory", relay.DefaultMaxMemory, "most bytes of requests held at once")
 	perSecond := fs.Float64("rate", relay.DefaultRate, "requests accepted a second, sustained")
 	var attrs resourceAttrs
-	fs.Var(&attrs, "resource-attr", "key=value set on the resource of every record the relay writes, overriding the vendor's; the key must be declared by a --registry-tools registry; repeatable")
+	fs.Var(&attrs, "resource-attr", "key=value set on the resource of every record the relay writes, overriding the vendor's; the key must be declared by a --registry-tools registry; refused on a standing relay (a fixed --listen port), so only with --listen port 0; repeatable")
 	relayTools := fs.String("registry-tools", env("YNR_REGISTRY_TOOLS", "ynh"), "tools whose telemetry registries declare the --resource-attr keys, by bare name on the PATH, comma separated (YNR_REGISTRY_TOOLS)")
 	keyFile := fs.String("key-file", os.Getenv("YNR_RELAY_KEY_FILE"), "file holding the key that hashes account ids: 32 bytes, raw or hex, mode 0600, outside the spool; without one the ids are dropped (YNR_RELAY_KEY_FILE)")
 	stdinEOF := fs.Bool("exit-on-stdin-eof", false, "also stop when standard input closes, so the relay ends with the process that started it")
@@ -448,6 +450,10 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return ExitUsage
 	case *maxRequest <= 0 || *maxMemory <= 0 || *perSecond <= 0:
 		_, _ = fmt.Fprintln(stderr, "ynr: --max-request, --max-memory and --rate must be positive")
+		return ExitConfig
+	}
+	if len(attrs) > 0 && relay.Standing(*listen) {
+		_, _ = fmt.Fprintf(stderr, "ynr: --resource-attr: %v\n", relay.ErrStandingResourceAttr(*listen))
 		return ExitConfig
 	}
 	if len(attrs) > 0 {
