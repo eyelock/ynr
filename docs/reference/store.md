@@ -113,7 +113,8 @@ expired lease may be taken over; a live one means another central is compacting 
 
 A tool's `telemetry registry --format json`, written by `ynr serve` for each tool named in
 `--registry-tools`, at the key its tool, version and content hash give. Two different registries for
-the same tool and version sit side by side.
+the same tool and version sit side by side. A version's SemVer build metadata (the `+...` suffix, such as `0.3.0+1d16688` from a locally built tool) is
+left out of the key, since SemVer ignores it when comparing versions; the registry object keeps the full version.
 
 ## What a reader accepts
 
