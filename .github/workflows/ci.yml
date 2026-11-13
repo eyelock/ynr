@@ -7,8 +7,8 @@ permissions:
   contents: read
 concurrency:
   group: ci-${{ github.ref }}
-  # Only a superseded pull request run is cancelled. A push to main or develop always finishes:
-  # cancelling it by the next merge hid a red develop until too late.
+  # Only a superseded pull request run is cancelled. A push to main or develop, and a merge queue
+  # run, always finishes: cancelling it by the next merge hid a red develop until too late.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:
