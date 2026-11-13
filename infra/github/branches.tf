@@ -13,7 +13,8 @@ resource "github_branch_default" "develop" {
 locals {
   # Rulesets by branch, with the status checks each requires. "All Clear" is the last job of the ci
   # workflow, which needs every other job; "Verify PR source branch" (protect-main.yml) runs only on
-  # PRs into main, so it takes only develop, release/* and hotfix/*.
+  # PRs into main, so it takes only develop, release/* and hotfix/*. merge_method is how a pull
+  # request is merged by hand, not a ruleset setting: develop squashes, main makes merge commits.
   rulesets = {
     develop = {
       name         = "Develop Branch Protection"
@@ -61,21 +62,6 @@ resource "github_repository_ruleset" "this" {
       require_code_owner_review         = false
       require_last_push_approval        = false
       required_review_thread_resolution = true
-    }
-
-    # The merge queue: each pull request is tested merged with those ahead of it before it lands,
-    # so two green pull requests that break each other cannot both reach the branch. The required
-    # checks run on the merge_group event (ci.yml, protect-main.yml). develop squashes, as feature
-    # PRs always have; main makes merge commits. The one back-merge per release, main into develop,
-    # must be a true merge, so an admin merges it around the queue (the ruleset's admin bypass).
-    merge_queue {
-      merge_method                      = each.value.merge_method
-      grouping_strategy                 = "ALLGREEN"
-      min_entries_to_merge              = 1
-      max_entries_to_merge              = 5
-      min_entries_to_merge_wait_minutes = 1
-      max_entries_to_build              = 5
-      check_response_timeout_minutes    = 60
     }
 
     required_status_checks {
