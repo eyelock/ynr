@@ -507,6 +507,13 @@ func freePort(t *testing.T) string {
 // must reach the spool: none refused as busy or rate limited. Reserving the largest request size
 // for each, the default memory limit held only 16 at once, and under load this test saw 16 of 160
 // refused as busy; each now reserves its own length.
+//
+// Each seat is one client with one keep-alive connection, as an OTLP exporter is, so 40
+// connections open at once and each carries its seat's four requests in turn. The test once opened
+// 160 connections in the same instant instead. On macOS the kernel's listen queue
+// (kern.ipc.somaxconn, 128) cannot hold that many unaccepted connections, and it reset the
+// overflow ("connection reset by peer", about 3 runs in 20) before the relay ever saw it: a limit
+// of the operating system that no relay code can raise, not a loss by the relay (ynr #120).
 func TestRelay_ManySeatsAtDefaults(t *testing.T) {
 	const seats, each = 40, 4
 	r, stop := start(t, Config{Listen: freePort(t)})
@@ -518,24 +525,23 @@ func TestRelay_ManySeatsAtDefaults(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			tr := &http.Transport{MaxConnsPerHost: 1}
+			defer tr.CloseIdleConnections()
+			client := &http.Client{Transport: tr}
 			<-gate
-			var inner sync.WaitGroup
 			for range each {
-				inner.Add(1)
-				go func() {
-					defer inner.Done()
-					req, _ := http.NewRequest(http.MethodPost, r.Endpoint()+"/v1/traces", bytes.NewReader(body))
-					req.Header.Set("Content-Type", "application/x-protobuf")
-					resp, err := http.DefaultClient.Do(req)
-					if err != nil {
-						codes <- 0
-						return
-					}
-					_ = resp.Body.Close()
-					codes <- resp.StatusCode
-				}()
+				req, _ := http.NewRequest(http.MethodPost, r.Endpoint()+"/v1/traces", bytes.NewReader(body))
+				req.Header.Set("Content-Type", "application/x-protobuf")
+				resp, err := client.Do(req)
+				if err != nil {
+					t.Log(err)
+					codes <- 0
+					continue
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				codes <- resp.StatusCode
 			}
-			inner.Wait()
 		}()
 	}
 	close(gate)
