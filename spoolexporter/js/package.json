@@ -30,8 +30,8 @@
     "test": "npm run build && node --test \"test/*.test.mjs\""
   },
   "dependencies": {
-    "@opentelemetry/core": "^3.0.0",
-    "@opentelemetry/otlp-transformer": "^0.300.0"
+    "@opentelemetry/core": "^3.1.0",
+    "@opentelemetry/otlp-transformer": "^0.301.0"
   },
   "peerDependencies": {
     "@opentelemetry/sdk-logs": "^3.0.0",
