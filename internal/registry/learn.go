@@ -26,8 +26,10 @@ var AskTimeout = 10 * time.Second
 const maxRegistry = 8 << 20
 
 var (
-	toolPattern    = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
-	versionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,63}$`)
+	toolPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
+	// A version may end in SemVer build metadata, such as the 0.3.0+1d16688 a locally built tool
+	// reports. The store key drops it (store.RegistryKey), since SemVer ignores it.
+	versionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]{0,63}(\+[0-9A-Za-z][0-9A-Za-z.-]{0,63})?$`)
 )
 
 // Learned is one registry a tool printed: the registry, and the bytes it was read from, whose
