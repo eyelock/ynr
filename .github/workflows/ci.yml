@@ -1,9 +1,6 @@
 name: ci
 on:
   pull_request:
-  # The merge queue tests each pull request together with those ahead of it, on a gh-readonly-queue
-  # branch, and waits for the ruleset's required check (All Clear) to report there.
-  merge_group:
   push:
     branches: [main, develop]
 permissions:
