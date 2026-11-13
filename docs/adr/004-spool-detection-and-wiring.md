@@ -216,8 +216,8 @@ inbound `TRACEPARENT`, so no single mechanism joins every vendor:
    labels. This works for any vendor that honours the standard variable. As a resource attribute it
    reaches the vendor's metrics, which ADR-006 rule 8 allows as its one named exception: one value
    per launch, dropped or rolled up by ynr before rollups.
-3. A per-launch relay stamps `ynh.session.id` on every record it receives (ynw-17g.28, to be
-   built), so a vendor that ignores the first two is still joined. The stamp goes on metrics too, under the
+3. A per-launch relay stamps `ynh.session.id` on every record it receives (`ynr relay
+   --resource-attr`, built in [ynr #118](https://github.com/eyelock/ynr/pull/118)), so a vendor that ignores the first two is still joined. The stamp goes on metrics too, under the
    same rule 8 exception. A standing relay serves many seats and cannot know which launch a record
    belongs to, so only layers 1 and 2 apply to it: `ynr relay` refuses `--resource-attr` on a relay
    with a fixed `--listen` port.
