@@ -156,12 +156,18 @@ func New(cfg Config) (*Relay, error) {
 	if len(cfg.ResourceAttrs) > 0 && Standing(cfg.Listen) {
 		return nil, ErrStandingResourceAttr(cfg.Listen)
 	}
+	valueCheck := newScrubber(cfg.Home)
 	for k, v := range cfg.ResourceAttrs {
 		if k == "" || v == "" {
 			return nil, fmt.Errorf("relay: resource attribute %q=%q: key and value must not be empty", k, v)
 		}
 		if slices.Contains(Stripped, k) {
 			return nil, fmt.Errorf("relay: resource attribute %q is on the strip list (it names a person or the machine) and cannot be stamped", k)
+		}
+		// The stamp is applied after the strip, so a value the strip rules would drop must not be
+		// stamped: an email address or a path under the home folder.
+		if valueCheck.underHome(v) || email.MatchString(v) {
+			return nil, fmt.Errorf("relay: resource attribute %q: the value is an email address or a path under the home folder, which the relay strips from every record and so cannot stamp", k)
 		}
 	}
 	var hash *hasher
