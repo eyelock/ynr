@@ -80,6 +80,8 @@ Wheelhouse's: it records itself in the folder for ynr info and ynr doctor, and r
 the folder with another standing relay. --resource-attr (repeatable) sets an attribute on the
 resource of every record the relay writes, over a vendor's value; its key must be one a
 --registry-tools registry declares (default ynh), such as ynh.session.id, or the relay refuses to start.
+--resource-attr is for a per-launch relay only: a standing relay (a fixed --listen port) refuses it,
+so use --listen port 0, the default.
 
 ynr conformance runs the scenarios in a tool's conformance file against a temporary spool and a
 local test endpoint, and checks the instrumentation contract (ADR-006, ADR-008). It exits 1 if any
@@ -406,7 +408,7 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	maxMemory := fs.Int64("max-memory", relay.DefaultMaxMemory, "most bytes of requests held at once")
 	perSecond := fs.Float64("rate", relay.DefaultRate, "requests accepted a second, sustained")
 	var attrs resourceAttrs
-	fs.Var(&attrs, "resource-attr", "key=value set on the resource of every record the relay writes, overriding the vendor's; the key must be declared by a --registry-tools registry; repeatable")
+	fs.Var(&attrs, "resource-attr", "key=value set on the resource of every record the relay writes, overriding the vendor's; the key must be declared by a --registry-tools registry; refused on a standing relay (a fixed --listen port), so only with --listen port 0; repeatable")
 	relayTools := fs.String("registry-tools", env("YNR_REGISTRY_TOOLS", "ynh"), "tools whose telemetry registries declare the --resource-attr keys, by bare name on the PATH, comma separated (YNR_REGISTRY_TOOLS)")
 	stdinEOF := fs.Bool("exit-on-stdin-eof", false, "also stop when standard input closes, so the relay ends with the process that started it")
 	if err := fs.Parse(args); err != nil {
