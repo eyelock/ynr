@@ -24,6 +24,9 @@ func conformanceCmd(ctx context.Context, args []string, stdout, stderr io.Writer
 	if err := fs.Parse(args); err != nil {
 		return ExitUsage
 	}
+	if !noArgs(fs, stderr) {
+		return ExitUsage
+	}
 	if *format != "text" && *format != "json" {
 		_, _ = fmt.Fprintln(stderr, "ynr: --format must be text or json")
 		return ExitUsage

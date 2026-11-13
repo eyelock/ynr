@@ -439,3 +439,36 @@ func TestRelayRefusesMisdeclaredAndStrippedKeys(t *testing.T) {
 		}
 	}
 }
+
+// TestCommandsRefuseStrayArguments: a positional argument no command takes is refused with exit 2
+// and a message naming it, before the command does anything (ynr #127). The case that bit was a
+// relay started with `resource-attr k=v`, the dashes forgotten, which ran without the stamp.
+func TestCommandsRefuseStrayArguments(t *testing.T) {
+	spool := t.TempDir()
+	for name, args := range map[string][]string{
+		"version":            {"version", "extra"},
+		"--version":          {"--version", "extra"},
+		"info":               {"info", "--spool", spool, "extra"},
+		"doctor":             {"doctor", "extra"},
+		"relay":              {"relay", "--spool", spool, "resource-attr", "k=v"},
+		"serve":              {"serve", "extra"},
+		"central":            {"central", "extra"},
+		"conformance":        {"conformance", "extra"},
+		"telemetry registry": {"telemetry", "registry", "extra"},
+	} {
+		var out, errb bytes.Buffer
+		code := Run(context.Background(), args, &out, &errb)
+		if code != ExitUsage {
+			t.Errorf("%s: exit %d, want %d (stderr %q)", name, code, ExitUsage, errb.String())
+		}
+		if !strings.Contains(errb.String(), "takes no arguments") || !strings.Contains(errb.String(), `"extra"`) && name != "relay" {
+			t.Errorf("%s: stderr %q does not name the argument", name, errb.String())
+		}
+		if name == "relay" && !strings.Contains(errb.String(), `"resource-attr"`) {
+			t.Errorf("relay: stderr %q does not name resource-attr", errb.String())
+		}
+		if out.Len() != 0 {
+			t.Errorf("%s: printed %q", name, out.String())
+		}
+	}
+}
