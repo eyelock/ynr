@@ -4,7 +4,10 @@
 # each time with one custom subagent, and print the attribute NAMES it exported that are not on
 # the list. Names only: values are never written to disk or printed.
 #
-# Usage: scripts/probe-claude-code-otel.sh [--keep-dir DIR]
+# Usage: [CLAUDE_BIN=/path/to/claude] scripts/probe-claude-code-otel.sh [--keep-dir DIR]
+#
+# CLAUDE_BIN chooses the claude binary, for both --version and the probe runs; it defaults to the
+# `claude` on PATH.
 #
 # It makes real (small) model calls with `claude -p`, so run it yourself, on the version you mean
 # to pin, and read docs/how-to/re-verify-the-claude-code-attribute-list.md first.
@@ -13,7 +16,8 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 list="$root/internal/relay/claude-code-attributes.txt"
 pin="$(sed -n 's/^const ClaudeCodePin = "\(.*\)"$/\1/p' "$root/internal/relay/vendor.go")"
-version="$(claude --version | awk '{print $1}')"
+claude_bin="${CLAUDE_BIN:-claude}"
+version="$("$claude_bin" --version | awk '{print $1}')"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 if [ "${1:-}" = "--keep-dir" ]; then work="$2"; mkdir -p "$work"; trap - EXIT; fi
@@ -61,7 +65,7 @@ probe() { # $1 = label, $2 = OTEL_LOG_TOOL_DETAILS value or empty
     CLAUDE_CODE_ENHANCED_TELEMETRY_BETA=1 OTEL_METRIC_EXPORT_INTERVAL=1000 OTEL_LOGS_EXPORT_INTERVAL=1000
     OTEL_TRACES_EXPORT_INTERVAL=1000 OTEL_RESOURCE_ATTRIBUTES=probe.label=$label)
   [ -n "$details" ] && env+=(OTEL_LOG_TOOL_DETAILS="$details")
-  env "${env[@]}" claude -p \
+  env "${env[@]}" "$claude_bin" -p \
     --agents '{"probe-agent":{"description":"Probe subagent","prompt":"Reply with the single word ok."}}' \
     --allowedTools "Bash(echo probe)" Agent \
     -- "Use the probe-agent subagent to say ok, then run the shell command 'echo probe' and reply done." \

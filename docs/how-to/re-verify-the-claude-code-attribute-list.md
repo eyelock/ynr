@@ -19,7 +19,8 @@ scripts/probe-claude-code-otel.sh
 ```
 
 To probe a version other than the one you run, install it into a folder of its own and point
-`CLAUDE_BIN` at it:
+`CLAUDE_BIN` at it (the script uses it for `--version` and for the probe runs; without it, the
+`claude` on `PATH`):
 
 ```bash
 CLAUDE_BIN=/path/to/node_modules/.bin/claude scripts/probe-claude-code-otel.sh
