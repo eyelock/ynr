@@ -15,6 +15,7 @@ import (
 
 	"github.com/eyelock/ynr"
 	"github.com/eyelock/ynr/internal/query"
+	"github.com/eyelock/ynr/internal/relay"
 	"github.com/eyelock/ynr/internal/spool"
 	"github.com/eyelock/ynr/internal/store"
 )
@@ -58,6 +59,7 @@ func doctor(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		checkSpool(*root),
 		checkServing(*root),
 		checkRelay(*root),
+		checkVendorAttrs(*root),
 		checkBacklog(*root, time.Now()),
 		checkStore(*storeURL),
 		checkQueries(ctx, *root),
@@ -157,6 +159,30 @@ func checkRelay(root string) check {
 		return check{"relay", statusOK, "no standing ynr relay writes into " + dir}
 	}
 	return check{"relay", statusOK, fmt.Sprintf("pid %d at %s since %s, into %s", info.PID, info.Endpoint, info.Since.Format(time.RFC3339), dir)}
+}
+
+// checkVendorAttrs reports the Claude Code attribute names the standing relay received that are
+// not on the list pinned in the repository: the strip list fails open, so a new name may carry
+// something it does not know to drop. Names only, never values. The record covers the relay's
+// current run, so it clears when the relay restarts.
+func checkVendorAttrs(root string) check {
+	a, err := spool.ReadRelayAttrs(filepath.Join(root, spool.LocalDir))
+	switch {
+	case err != nil:
+		return check{"vendor", statusFail, err.Error()}
+	case a == nil:
+		return check{"vendor", statusOK, "no standing relay has reported names outside the Claude Code " + relay.ClaudeCodePin + " list"}
+	}
+	names := relay.UnknownNames(a.Unknown)
+	if len(names) == 0 {
+		return check{"vendor", statusOK, fmt.Sprintf("every %s attribute name since %s is on the %s list", a.Vendor, a.Since.Format(time.RFC3339), a.Version)}
+	}
+	var total int64
+	for _, n := range a.Unknown {
+		total += n
+	}
+	return check{"vendor", statusWarn, fmt.Sprintf("%d %s attribute names are not on the %s list (%d received since %s, names only): %s; check whether each carries content, then re-run the probe and add it to the list or to the strip list",
+		len(names), a.Vendor, a.Version, total, a.Since.Format(time.RFC3339), strings.Join(names, ", "))}
 }
 
 // checkBacklog warns when closed files wait long in the spool: ynr serve ships a closed file at

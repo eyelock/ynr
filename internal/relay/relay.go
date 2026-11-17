@@ -100,7 +100,10 @@ type Stats struct {
 	Limited   int64 // refused: over the rate limit
 	Malformed int64 // refused: not decodable OTLP, or an unknown path or content type
 	Stripped  int64 // attributes dropped before the spool: Stripped names, and paths under home
-	Spool     spoolexporter.Stats
+	// Unknown counts, by name, the attributes on Claude Code's records whose names are not on
+	// ClaudeCodeAttributes (the list for ClaudeCodePin). Names only, never values.
+	Unknown map[string]int64
+	Spool   spoolexporter.Stats
 }
 
 // Relay is a running relay.
@@ -112,6 +115,7 @@ type Relay struct {
 	limiter  *rate.Limiter
 	scrub    *scrubber
 	lock     *spool.Lock // held by a standing relay; nil on port 0
+	started  time.Time
 	inflight atomic.Int64
 	active   atomic.Int64 // requests being handled now
 
@@ -224,6 +228,7 @@ func New(cfg Config) (*Relay, error) {
 		lock:    lock,
 		limiter: rate.NewLimiter(rate.Limit(cfg.Rate), cfg.Burst),
 		scrub:   newScrubber(cfg.Home),
+		started: time.Now().UTC().Truncate(time.Second),
 	}
 	r.scrub.hash = hash
 	mux := http.NewServeMux()
@@ -259,10 +264,12 @@ func (r *Relay) Endpoint() string { return "http://" + r.ln.Addr().String() }
 
 // Stats reports what the relay has done so far.
 func (r *Relay) Stats() Stats {
+	unknown, _ := r.scrub.unknown.snapshot(false)
 	return Stats{
 		Accepted: r.accepted.Load(), TooLarge: r.tooLarge.Load(), Busy: r.busy.Load(),
 		Limited: r.limited.Load(), Malformed: r.malformed.Load(), Stripped: r.stripped.Load(),
-		Spool: r.w.Stats(),
+		Unknown: unknown,
+		Spool:   r.w.Stats(),
 	}
 }
 
@@ -274,6 +281,26 @@ func (r *Relay) Serve(ctx context.Context) error {
 	}
 	errc := make(chan error, 1)
 	go func() { errc <- r.srv.Serve(r.ln) }()
+	if r.lock != nil {
+		// Only a standing relay is read by ynr doctor, so only it records the unknown names.
+		r.flushAttrs(true)
+		fctx, stopFlush := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			t := time.NewTicker(2 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-fctx.Done():
+					return
+				case <-t.C:
+					r.flushAttrs(false)
+				}
+			}
+		}()
+		defer func() { stopFlush(); <-done; r.flushAttrs(false) }()
+	}
 	select {
 	case err := <-errc:
 		r.w.Close()
@@ -296,6 +323,19 @@ func (r *Relay) Serve(ctx context.Context) error {
 	}
 	r.w.Close()
 	return err
+}
+
+// flushAttrs writes the unknown-name record into the relay's folder when it changed, or always
+// with force (which starts a fresh record for this run). A write failure is not the relay's to
+// fail on: ynr doctor then simply has nothing to show.
+func (r *Relay) flushAttrs(force bool) {
+	counts, changed := r.scrub.unknown.snapshot(true)
+	if !changed && !force {
+		return
+	}
+	_ = spool.WriteRelayAttrs(r.cfg.Dir, spool.RelayAttrs{
+		Vendor: "claude-code", Version: ClaudeCodePin, Since: r.started, Unknown: counts,
+	})
 }
 
 // decoder turns an OTLP request body into scrubbed OTLP JSON and its record count.

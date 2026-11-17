@@ -51,7 +51,7 @@ Each process writes its own files in its writer folder, so there is no locking:
 ```
 
 `ynr relay` names its files `ynr-relay-<pid>-<seq>`. A standing relay (on a fixed port) also keeps
-`.ynr-relay.lock` in its folder, holding its pid, start time and endpoint; the reader skips it.
+`.ynr-relay.lock` in its folder, holding its pid, start time and endpoint, and `.ynr-relay-attrs.json`, naming the vendor attributes it received that are not on the pinned list, with counts and no values; the reader skips both.
 
 Each line is one OTLP export request in the OTLP/JSON encoding: an `ExportTraceServiceRequest`
 (`resourceSpans`), an `ExportMetricsServiceRequest` (`resourceMetrics`) or an

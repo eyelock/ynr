@@ -501,6 +501,10 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	s := r.Stats()
 	_, _ = fmt.Fprintf(stderr, "ynr relay: %d accepted; refused %d too large, %d busy, %d rate limited, %d malformed; %d attributes stripped; %d records dropped by the spool\n",
 		s.Accepted, s.TooLarge, s.Busy, s.Limited, s.Malformed, s.Stripped, s.Spool.Dropped)
+	if len(s.Unknown) > 0 {
+		_, _ = fmt.Fprintf(stderr, "ynr relay: %d Claude Code attribute names not on the %s list: %s\n",
+			len(s.Unknown), relay.ClaudeCodePin, strings.Join(relay.UnknownNames(s.Unknown), ", "))
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
 		return ExitAdapter
