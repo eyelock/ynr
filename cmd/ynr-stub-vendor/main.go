@@ -87,7 +87,7 @@ func run(args, environ []string, stdin io.Reader, stdout, stderr io.Writer) int 
 	effort := fs.String("effort", "", "reported by the session's settings")
 	sessionID := fs.String("session-id", "", "the session's id")
 	resume := fs.String("resume", "", "the session id to resume")
-	for _, name := range []string{"plugin-dir", "add-dir", "append-system-prompt", "settings"} {
+	for _, name := range []string{"plugin-dir", "add-dir", "append-system-prompt", "settings", "allowedTools"} {
 		_ = fs.String(name, "", "ignored")
 	}
 	if err := fs.Parse(args); err != nil {

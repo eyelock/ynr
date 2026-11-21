@@ -209,3 +209,22 @@ func TestHungEndpointCostsAboutASecond(t *testing.T) {
 		t.Errorf("took %s", d)
 	}
 }
+
+// ynh launches Claude Code with --allowedTools, as one argument or two; the stub accepts and
+// ignores it, as it does --add-dir.
+func TestAllowedToolsIsAcceptedAndIgnored(t *testing.T) {
+	for name, args := range map[string][]string{
+		"equals": {"-p", "hi", "--allowedTools=Read(//run/**)"},
+		"spaced": {"-p", "hi", "--allowedTools", "Read(//run/**)", "Agent"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			if code := run(args, nil, nilIn, &out, &errb); code != 0 {
+				t.Fatalf("exit %d, stderr: %s", code, errb.String())
+			}
+			if !strings.Contains(out.String(), `"subtype":"success"`) {
+				t.Errorf("no result line: %s", out.String())
+			}
+		})
+	}
+}
