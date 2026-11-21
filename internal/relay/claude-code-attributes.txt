@@ -1,0 +1,119 @@
+# Claude Code attribute names, by name only, verified on the version pinned in vendor.go
+# (ClaudeCodePin) by scripts/probe-claude-code-otel.sh: one run without and one with
+# OTEL_LOG_TOOL_DETAILS=1, one custom subagent, a Bash call. One name per line; blank lines and
+# lines starting with # are ignored. Resource and scope attributes are not checked.
+#
+# Being on this list means the name has been seen and read, not that it is safe: tool_input and
+# tool_parameters are on the list and are stripped by the relay (Stripped in scrub.go).
+#
+# Left off on purpose, so ynr doctor keeps flagging them until someone decides whether the relay
+# strips them: these names carry content (a command line, prompt or response text, or the model
+# request context) when OTEL_LOG_TOOL_DETAILS or the prompt/response logging settings are on.
+#   full_command prompt_text user_prompt response llm_request.context bash_argv0
+#
+# Re-run the probe when the pin moves; update this file and ClaudeCodePin together.
+agent.name
+agent.source
+agent_id
+agent_path_count
+agent_type
+anthropic.custom_base_url
+anthropic.plan
+anthropic.provider
+attempt
+bash_command_class
+cache_creation_1h_tokens
+cache_creation_5m_tokens
+cache_creation_tokens
+cache_read_tokens
+client_request_id
+command_path_count
+cost_usd
+cost_usd_micros
+decision
+duration_ms
+effort
+enabled_via
+error
+error_code
+event.name
+event.sequence
+event.timestamp
+final_model
+first_content_ms
+gen_ai.conversation.id
+gen_ai.operation.name
+gen_ai.provider.name
+gen_ai.request.model
+gen_ai.response.finish_reasons
+gen_ai.response.id
+gen_ai.system
+gen_ai.tool.call.id
+gen_ai.tool.name
+has_hooks
+has_mcp
+host_owned_mcp
+input_tokens
+interaction.duration_ms
+interaction.sequence
+is_async
+is_built_in
+is_plugin
+link.type
+managed_settings.helper.applied
+managed_settings.helper.state
+managed_settings.source_behavior
+managed_settings.sources
+managed_settings.trigger
+marketplace.name
+message.uuid
+model
+model_swapped
+organization.id
+output_tokens
+parent.source
+permission_mode
+plugin.name
+plugin.scope
+plugin.version
+plugin_id_hash
+prompt
+prompt.id
+prompt_length
+query_source
+query_source_safe
+queued_sends
+request_id
+response_length
+safe_mode
+server_name
+server_scope
+session.id
+skill_path_count
+source
+span.type
+speed
+start_type
+status
+stop_reason
+subagent_type
+success
+terminal.type
+tool_input
+tool_input_size_bytes
+tool_name
+tool_name_safe
+tool_parameters
+tool_result_size_bytes
+tool_source
+tool_use_id
+total_tokens
+total_tool_uses
+transport_type
+ttft_ms
+type
+user.account_id
+user.account_uuid
+user.email
+user.id
+user_prompt_length

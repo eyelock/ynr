@@ -174,7 +174,7 @@ func (r *Reader) pollWriter(ctx context.Context, w Writer, h Handler, seen map[s
 	var names []string
 	for _, e := range entries {
 		n := e.Name()
-		if n == RelayLockName {
+		if n == RelayLockName || n == RelayAttrsName || n == RelayAttrsName+".tmp" {
 			continue // a standing relay's record of itself, not a spool file
 		}
 		if !strings.HasSuffix(n, ClosedSuffix) {

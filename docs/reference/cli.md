@@ -60,7 +60,7 @@ ynr doctor [--spool <root>] [--store <url>] [--format text|json]
 | `--store` | `file://$XDG_DATA_HOME/ynr/store`, or `file://~/.local/share/ynr/store` | The store `ynr serve` ships to. `YNR_STORE`. |
 | `--format` | `text` | `text` or `json`: `version`, `build` and `checks`, each with `name`, `status` and `detail`. |
 
-Checks, in order: `otlp`, `path`, `spool`, `serve`, `relay`, `backlog`, `store`, `queries`. Each is
+Checks, in order: `otlp`, `path`, `spool`, `serve`, `relay`, `vendor`, `backlog`, `store`, `queries`. Each is
 `ok`, `warn` or `fail`. Exit 1 if any is not `ok`.
 
 ### ynr serve
@@ -169,6 +169,13 @@ its pid, start time and endpoint in `.ynr-relay.lock` in its folder, which `ynr 
 doctor` read for the spool's `local/` folder, and it refuses to start while another standing relay
 holds that folder. When the port is taken it says so, naming the relay that holds it if that relay
 writes into the same folder. A relay on port `0`, such as a run's, records nothing.
+
+A relay also counts the attribute names on Claude Code's records (instrumentation scope
+`com.anthropic.claude_code`) that are not on the list verified for the pinned Claude Code version
+(`internal/relay/claude-code-attributes.txt`, version in `internal/relay/vendor.go`). A standing
+relay writes the names and counts, never values, to `.ynr-relay-attrs.json` in its folder, which
+`ynr doctor` shows as the `vendor` check, and every relay prints them when it stops. See
+[Re-verify the Claude Code attribute list](../how-to/re-verify-the-claude-code-attribute-list.md).
 
 The default limits fit many seats at once. A Claude Code process sends well under one request a
 second, and a test sends 160 requests from 40 senders, one connection each, at one instant through one relay

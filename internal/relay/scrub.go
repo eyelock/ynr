@@ -47,7 +47,21 @@ type scrubber struct {
 	names map[string]bool
 	home  string  // cleaned, without a trailing separator; empty when unknown or the root
 	hash  *hasher // nil without a key: the account ids are then dropped
+	// unknown counts the names on Claude Code's records that are not on ClaudeCodeAttributes.
+	unknown unknownSet
 }
+
+// note counts the names in m, an already scrubbed attribute map of a Claude Code record, that
+// are not on the pinned list. It reads keys only, never values.
+func (s *scrubber) note(m pcommon.Map) {
+	for k := range m.All() {
+		if !ClaudeCodeAttributes[k] {
+			s.unknown.add(k)
+		}
+	}
+}
+
+func claudeScope(name string) bool { return strings.HasPrefix(name, claudeCodeScope) }
 
 func newScrubber(home string) *scrubber {
 	s := &scrubber{names: make(map[string]bool, len(Stripped))}
@@ -125,10 +139,17 @@ func (s *scrubber) traces(td ptrace.Traces) int {
 		n += s.attrs(rs.Resource().Attributes())
 		for _, ss := range rs.ScopeSpans().All() {
 			n += s.attrs(ss.Scope().Attributes())
+			claude := claudeScope(ss.Scope().Name())
 			for _, sp := range ss.Spans().All() {
 				n += s.attrs(sp.Attributes())
+				if claude {
+					s.note(sp.Attributes())
+				}
 				for _, ev := range sp.Events().All() {
 					n += s.attrs(ev.Attributes())
+					if claude {
+						s.note(ev.Attributes())
+					}
 				}
 				for _, l := range sp.Links().All() {
 					n += s.attrs(l.Attributes())
@@ -145,8 +166,12 @@ func (s *scrubber) logs(ld plog.Logs) int {
 		n += s.attrs(rl.Resource().Attributes())
 		for _, sl := range rl.ScopeLogs().All() {
 			n += s.attrs(sl.Scope().Attributes())
+			claude := claudeScope(sl.Scope().Name())
 			for _, lr := range sl.LogRecords().All() {
 				n += s.attrs(lr.Attributes())
+				if claude {
+					s.note(lr.Attributes())
+				}
 			}
 		}
 	}
@@ -159,16 +184,23 @@ func (s *scrubber) metrics(md pmetric.Metrics) int {
 		n += s.attrs(rm.Resource().Attributes())
 		for _, sm := range rm.ScopeMetrics().All() {
 			n += s.attrs(sm.Scope().Attributes())
+			claude := claudeScope(sm.Scope().Name())
 			for _, m := range sm.Metrics().All() {
-				n += s.metric(m)
+				n += s.metric(m, claude)
 			}
 		}
 	}
 	return n
 }
 
-func (s *scrubber) metric(m pmetric.Metric) int {
+func (s *scrubber) metric(m pmetric.Metric, claude bool) int {
 	n := 0
+	point := func(a pcommon.Map) {
+		n += s.attrs(a)
+		if claude {
+			s.note(a)
+		}
+	}
 	exemplars := func(es pmetric.ExemplarSlice) {
 		for _, e := range es.All() {
 			n += s.attrs(e.FilteredAttributes())
@@ -177,27 +209,27 @@ func (s *scrubber) metric(m pmetric.Metric) int {
 	switch m.Type() {
 	case pmetric.MetricTypeGauge:
 		for _, dp := range m.Gauge().DataPoints().All() {
-			n += s.attrs(dp.Attributes())
+			point(dp.Attributes())
 			exemplars(dp.Exemplars())
 		}
 	case pmetric.MetricTypeSum:
 		for _, dp := range m.Sum().DataPoints().All() {
-			n += s.attrs(dp.Attributes())
+			point(dp.Attributes())
 			exemplars(dp.Exemplars())
 		}
 	case pmetric.MetricTypeHistogram:
 		for _, dp := range m.Histogram().DataPoints().All() {
-			n += s.attrs(dp.Attributes())
+			point(dp.Attributes())
 			exemplars(dp.Exemplars())
 		}
 	case pmetric.MetricTypeExponentialHistogram:
 		for _, dp := range m.ExponentialHistogram().DataPoints().All() {
-			n += s.attrs(dp.Attributes())
+			point(dp.Attributes())
 			exemplars(dp.Exemplars())
 		}
 	case pmetric.MetricTypeSummary:
 		for _, dp := range m.Summary().DataPoints().All() {
-			n += s.attrs(dp.Attributes())
+			point(dp.Attributes())
 		}
 	}
 	n += s.attrs(m.Metadata())

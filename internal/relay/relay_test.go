@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -110,7 +111,7 @@ func spoolLines(t *testing.T, dir string) []string {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if e.Name() == spool.RelayLockName {
+		if e.Name() == spool.RelayLockName || e.Name() == spool.RelayAttrsName {
 			continue
 		}
 		if !strings.HasSuffix(e.Name(), ".jsonl") || strings.HasSuffix(e.Name(), ".open.jsonl") {
@@ -865,5 +866,110 @@ func TestRelay_StripsToolDetailsKeepsSeatNames(t *testing.T) {
 	// Two attributes from each of 10 leaky maps: five in the trace, three in the metrics, two in the logs.
 	if s := r.Stats(); s.Stripped != 2*10 {
 		t.Errorf("stripped = %d, want 20", s.Stripped)
+	}
+}
+
+// claudeLogs builds a logs request under the scope name Claude Code exports with.
+func claudeLogs(t *testing.T, scope string, attrs map[string]string) []byte {
+	t.Helper()
+	ld := plog.NewLogs()
+	sl := ld.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty()
+	sl.Scope().SetName(scope)
+	lr := sl.LogRecords().AppendEmpty()
+	for k, v := range attrs {
+		lr.Attributes().PutStr(k, v)
+	}
+	b, err := plogotlp.NewExportRequestFromLogs(ld).MarshalProto()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// TestRelay_CountsUnknownClaudeCodeNames: a name on a Claude Code record that is not on the
+// pinned list is counted, by name only; known names, a stripped name, another vendor's names and
+// a Claude Code resource attribute are not; and a standing relay records the names for ynr doctor
+// without any value.
+func TestRelay_CountsUnknownClaudeCodeNames(t *testing.T) {
+	dir := t.TempDir()
+	r, stop := start(t, Config{Dir: dir, Listen: freePort(t)})
+	scope := "com.anthropic.claude_code.events"
+
+	body := claudeLogs(t, scope, map[string]string{
+		"tool_name":        "Bash",    // known
+		"agent.name":       "hannett", // known
+		"tool_input":       "ls",      // stripped, and on the list
+		"new_vendor_field": "SECRET-VALUE-1",
+		"another.new":      "SECRET-VALUE-2",
+	})
+	for range 2 {
+		if resp := post(t, r.Endpoint()+"/v1/logs", "application/x-protobuf", body, false); resp.StatusCode != 200 {
+			t.Fatalf("logs: %d", resp.StatusCode)
+		}
+	}
+	// Another vendor's unknown names are not this list's business.
+	other := claudeLogs(t, "codex", map[string]string{"codex_only": "x"})
+	if resp := post(t, r.Endpoint()+"/v1/logs", "application/x-protobuf", other, false); resp.StatusCode != 200 {
+		t.Fatalf("logs: %d", resp.StatusCode)
+	}
+
+	want := map[string]int64{"new_vendor_field": 2, "another.new": 2}
+	got := r.Stats().Unknown
+	if len(got) != len(want) || got["new_vendor_field"] != 2 || got["another.new"] != 2 {
+		t.Errorf("unknown = %v, want %v", got, want)
+	}
+
+	// The 2s flush writes the record while the relay runs; stop writes the final one.
+	stop()
+	a, err := spool.ReadRelayAttrs(dir)
+	if err != nil || a == nil {
+		t.Fatalf("attrs record = %v, %v", a, err)
+	}
+	if a.Version != ClaudeCodePin || a.Unknown["new_vendor_field"] != 2 || a.Unknown["another.new"] != 2 || len(a.Unknown) != 2 {
+		t.Errorf("record = %+v", a)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, spool.RelayAttrsName))
+	if strings.Contains(string(raw), "SECRET-VALUE") {
+		t.Errorf("record holds a value: %s", raw)
+	}
+}
+
+// TestRelay_UnknownNamesAreBounded: a name that is not made of name characters, and any beyond the
+// limit, are counted under one placeholder instead of being kept.
+func TestRelay_UnknownNamesAreBounded(t *testing.T) {
+	var u unknownSet
+	u.add("/Users/someone/secret")
+	u.add(strings.Repeat("a", maxNameLen+1))
+	for i := range maxUnknownNames + 10 {
+		u.add("n" + strconv.Itoa(i))
+	}
+	c, _ := u.snapshot(false)
+	if c[OtherName] < 2+10 {
+		t.Errorf("placeholder count = %d, want at least 12", c[OtherName])
+	}
+	if len(c) > maxUnknownNames {
+		t.Errorf("kept %d names", len(c))
+	}
+	for k := range c {
+		if strings.Contains(k, "/") {
+			t.Errorf("kept %q", k)
+		}
+	}
+}
+
+// TestClaudeCodeList: the list parses, names the pin's tool details and is free of blanks.
+func TestClaudeCodeList(t *testing.T) {
+	for _, n := range []string{"tool_input", "tool_parameters", "agent.name", "session.id"} {
+		if !ClaudeCodeAttributes[n] {
+			t.Errorf("%s missing from the list", n)
+		}
+	}
+	if ClaudeCodeAttributes[""] || ClaudeCodeAttributes["#"] {
+		t.Error("blank or comment parsed as a name")
+	}
+	for n := range ClaudeCodeAttributes {
+		if !usableName(n) {
+			t.Errorf("%q is not a usable name", n)
+		}
 	}
 }

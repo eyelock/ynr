@@ -18,6 +18,7 @@
   * [Run ynr central on S3](/how-to/run-central-on-s3.md)
   * [Add ynr conformance to a tool's CI](/how-to/add-conformance-to-ci.md)
   * [Set retention and erase a person](/how-to/set-retention-and-erase-a-person.md)
+  * [Re-verify the Claude Code attribute list](/how-to/re-verify-the-claude-code-attribute-list.md)
   * [Diagnose with ynr doctor](/how-to/diagnose-with-doctor.md)
   * [Deploy the AWS infrastructure](/how-to/deploy-the-aws-infrastructure.md)
   * [Cut a release](/how-to/cut-a-release.md)

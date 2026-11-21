@@ -9,6 +9,7 @@ Recipes for a goal you already have. Each gets to the point.
 | [Run ynr central on S3](run-central-on-s3.md) | Read a shared bucket from one place, try it against MinIO, and put sign-in or a reverse proxy in front of its dashboard |
 | [Add ynr conformance to a tool's CI](add-conformance-to-ci.md) | Make the instrumentation contract a required check, with the stub vendor and no model |
 | [Set retention and erase a person](set-retention-and-erase-a-person.md) | Change how long a folder store keeps records, and remove a handle from every query and from the store |
+| [Re-verify the Claude Code attribute list](re-verify-the-claude-code-attribute-list.md) | Run the probe against a Claude Code version, decide each new attribute name, and move the pin |
 | [Diagnose with ynr doctor](diagnose-with-doctor.md) | Find out why nothing is arriving, and read each check |
 | [Deploy the AWS infrastructure](deploy-the-aws-infrastructure.md) | Create the bucket and the roles with the Terraform in `infra/aws` |
 | [Cut a release](cut-a-release.md) | Take `develop` to a tagged release on `main`, and see what the workflow publishes |
