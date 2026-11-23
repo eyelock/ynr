@@ -66,7 +66,7 @@ Checks, in order: `otlp`, `path`, `spool`, `serve`, `relay`, `vendor`, `backlog`
 ### ynr serve
 
 ```
-ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>]
+ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>] [--upstream-header name=value]
           [--collector-id <id>] [--collector-instance <id>] [--poll 1s]
           [--max-line <bytes>] [--spool-cap <bytes>] [--hot-window 168h] [--retain 168h]
           [--retain-bytes <bytes>] [--erase <file>] [--ui 127.0.0.1:4319]
@@ -80,6 +80,7 @@ Runs in the foreground until Ctrl-C or `SIGTERM`.
 | `--spool` | the spool root | The spool root. `YNR_SPOOL_ROOT`. |
 | `--store` | the laptop folder store | The object store to ship batches to, such as `file:///path` or `s3://bucket?region=...`. An empty value ships only to the upstream. `YNR_STORE`. |
 | `--upstream` | none | An OTLP/HTTP endpoint to also forward to, such as `http://localhost:4318`. With a store, the upstream is a best-effort copy; without one, it commits the spool. `YNR_UPSTREAM`. |
+| `--upstream-header` | none | A header to send on every upstream export, `name=value`, such as `x-honeycomb-team=KEY`. Repeatable. Added to `OTEL_EXPORTER_OTLP_HEADERS`, and wins over it for the same name. |
 | `--collector-id` | `local-<host>` | This collector's identity: a runner pool or a host. Matches `^[a-z0-9][a-z0-9._-]{0,62}$`. A hostname too long for that is shortened and ends in a hash of the whole name. `YNR_COLLECTOR_ID`. |
 | `--collector-instance` | none | The job within the pool, recorded as data. `YNR_COLLECTOR_INSTANCE`. |
 | `--poll` | `1s` | How often to read the spool. |
@@ -92,6 +93,12 @@ Runs in the foreground until Ctrl-C or `SIGTERM`.
 | `--ui` | off | **full.** Serves the local dashboard on this address, which must be loopback (`127.0.0.1`, `::1` or `localhost`). `YNR_UI`. |
 | `--registry-tools` | none | Tools whose telemetry registries to learn at startup, comma separated, each run by bare name on `PATH` as `<tool> telemetry registry --format json`. A tool that is missing or fails is logged and skipped. `YNR_REGISTRY_TOOLS`. |
 | `--debug` | off | Also prints a summary of what is shipped, and the embedded Collector's info-level log lines (`ynr: collector info: ...`), which are otherwise left out: only its warnings and errors show. |
+
+With `--upstream`, serve also reads these standard variables for the upstream exporter: `OTEL_EXPORTER_OTLP_HEADERS`
+(comma-separated `name=value`, values percent-encoded), `OTEL_EXPORTER_OTLP_COMPRESSION` (`gzip`, the default, or `none`),
+`OTEL_EXPORTER_OTLP_CERTIFICATE` (a PEM CA file for the upstream's certificate), and `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`
+and `OTEL_EXPORTER_OTLP_CLIENT_KEY` (PEM files for mutual TLS). The signal-specific variants (`..._TRACES_HEADERS` and the
+like) are not read. A malformed value stops serve with exit code 30.
 
 At least one of `--store` and `--upstream` is needed. In the full build `ynr serve` also keeps the
 hot tier, compacts, and answers `ynr query` on a

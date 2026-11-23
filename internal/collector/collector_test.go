@@ -332,3 +332,81 @@ func TestShipsOnShutdownWithoutAStore(t *testing.T) {
 		t.Fatalf("upstream saw %d trace exports, want at least 2", n)
 	}
 }
+
+// TestUpstreamExportsCarryTheConfiguredHeaders: a header from OTEL_EXPORTER_OTLP_HEADERS and one
+// set directly reach the upstream on every export, and the directly set one wins a clash.
+func TestUpstreamExportsCarryTheConfiguredHeaders(t *testing.T) {
+	var mu sync.Mutex
+	var got http.Header
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		if r.URL.Path == "/v1/traces" {
+			mu.Lock()
+			got = r.Header.Clone()
+			mu.Unlock()
+		}
+		w.Header().Set("Content-Type", "application/x-protobuf")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	root := t.TempDir()
+	if err := spool.Init(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "local", "ynh-a-000001.jsonl"), []byte(traceLine+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := Settings{SpoolRoot: root, PollInterval: 20 * time.Millisecond, MaxLine: spool.DefaultMaxLine,
+		Identity: stamp.Identity{ID: "laptop"}, Upstream: srv.URL,
+		UpstreamHeaders: map[string]string{"x-team": "flag", "x-from-flag": "yes"}}
+	env := map[string]string{"OTEL_EXPORTER_OTLP_HEADERS": "x-api-key=s%3Dcret,x-team=env", "OTEL_EXPORTER_OTLP_COMPRESSION": "none"}
+	if err := UpstreamFromEnv(&s, func(k string) string { return env[k] }); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- Run(ctx, s) }()
+	deadline := time.Now().Add(15 * time.Second)
+	for {
+		mu.Lock()
+		h := got
+		mu.Unlock()
+		if h != nil {
+			if h.Get("x-api-key") != "s=cret" || h.Get("x-team") != "flag" || h.Get("x-from-flag") != "yes" {
+				t.Errorf("upstream headers = %v", h)
+			}
+			if h.Get("Content-Encoding") != "" {
+				t.Errorf("compression none, but Content-Encoding = %q", h.Get("Content-Encoding"))
+			}
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("the collector stopped before exporting: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatal("no upstream export arrived")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("run: %v", err)
+	}
+}
+
+func TestParseHeadersAndEnvErrors(t *testing.T) {
+	if _, err := ParseHeaders("novalue"); err == nil {
+		t.Error("accepted a header with no value")
+	}
+	var s Settings
+	if err := UpstreamFromEnv(&s, func(k string) string { return map[string]string{"OTEL_EXPORTER_OTLP_COMPRESSION": "zstd"}[k] }); err == nil {
+		t.Error("accepted compression zstd")
+	}
+	cfg, err := Config(Settings{Upstream: "http://x", UpstreamCA: "/ca.pem", UpstreamCert: "/c.pem", UpstreamKey: "/k.pem"})
+	if err != nil || !strings.Contains(cfg, `"ca_file":"/ca.pem"`) || !strings.Contains(cfg, `"key_file":"/k.pem"`) {
+		t.Errorf("tls not in config: %s %v", cfg, err)
+	}
+}
