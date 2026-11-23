@@ -43,7 +43,7 @@ Usage:
   ynr version
   ynr info [--spool <root>] [--format text|json]
   ynr doctor [--spool <root>] [--store <url>] [--format text|json]
-  ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>]
+  ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>] [--upstream-header name=value]
             [--collector-id <id>] [--collector-instance <id>] [--poll 1s]
             [--max-line <bytes>] [--spool-cap <bytes>] [--hot-window 168h] [--retain 168h] [--retain-bytes <bytes>]
             [--erase <file>] [--ui 127.0.0.1:4319] [--registry-tools ynh,ynf,ynm] [--debug]
@@ -312,6 +312,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	instance := fs.String("collector-instance", env("YNR_COLLECTOR_INSTANCE", ""), "the job within the pool, recorded as data (YNR_COLLECTOR_INSTANCE)")
 	storeURL := fs.String("store", envOr("YNR_STORE", defaultStore()), "object store to ship batches to, such as file:///path; empty for none (YNR_STORE)")
 	upstream := fs.String("upstream", env("YNR_UPSTREAM", ""), "OTLP/HTTP endpoint to also forward to, such as http://localhost:4318 (YNR_UPSTREAM)")
+	var upHeaders headerFlag
+	fs.Var(&upHeaders, "upstream-header", "a header to send on every upstream export, name=value; repeatable; adds to OTEL_EXPORTER_OTLP_HEADERS")
 	poll := fs.Duration("poll", time.Second, "how often to read the spool")
 	maxLine := fs.Int("max-line", spool.DefaultMaxLine, "longest line accepted, in bytes")
 	debug := fs.Bool("debug", false, "also print a summary of what is shipped")
@@ -400,7 +402,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	defer stopHot()
 	stopRetain := startRetention(ctx, *storeURL, store.Retention{Records: *retain, Rollups: store.LaptopRetention.Rollups, MaxBytes: *retainBytes}, stderr)
 	defer stopRetain()
-	err = collector.Run(ctx, collector.Settings{
+	settings := collector.Settings{
 		SpoolRoot:     *root,
 		PollInterval:  *poll,
 		MaxLine:       *maxLine,
@@ -410,7 +412,15 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		RegistryTools: splitList(*registryTools),
 		Upstream:      *upstream,
 		Debug:         *debug,
-	})
+	}
+	if *upstream != "" {
+		settings.UpstreamHeaders = upHeaders.m
+		if err := collector.UpstreamFromEnv(&settings, os.Getenv); err != nil {
+			_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
+			return ExitConfig
+		}
+	}
+	err = collector.Run(ctx, settings)
 	if err != nil && ctx.Err() == nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
 		return ExitAdapter
@@ -541,4 +551,23 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// headerFlag collects each --upstream-header name=value.
+type headerFlag struct{ m map[string]string }
+
+func (h *headerFlag) String() string { return "" }
+
+func (h *headerFlag) Set(v string) error {
+	m, err := collector.ParseHeaders(v)
+	if err != nil || len(m) != 1 {
+		return fmt.Errorf("want one name=value, got %q", v)
+	}
+	if h.m == nil {
+		h.m = map[string]string{}
+	}
+	for k, val := range m {
+		h.m[k] = val
+	}
+	return nil
 }
