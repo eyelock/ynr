@@ -165,11 +165,18 @@ func indexMissing(ctx context.Context, r store.Reader, day time.Time) (bool, err
 }
 
 func compactHour(ctx context.Context, r store.Reader, sig signal, hour time.Time, h *Hour, now time.Time) error {
+	// The next number is one past every part and manifest in the hour, not just the latest
+	// manifest's: a part left without its manifest by a crash would otherwise be chosen again,
+	// and the create-only Put would fail on it forever. The orphan is then superseded and pruned.
 	n := 1
+	for _, k := range h.All {
+		if m, _, err := store.ParseCompacted(k); err == nil && m >= n {
+			n = m + 1
+		}
+	}
 	var covered []string
 	var parts []string
 	if h.Manifest != nil {
-		n = h.Manifest.N + 1
 		covered = append(covered, h.Manifest.Batches...)
 		var err error
 		if parts, err = local(ctx, r, h.Parts); err != nil {
