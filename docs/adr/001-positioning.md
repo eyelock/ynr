@@ -88,6 +88,29 @@ There are two flavours over one UI: the local dashboard in `ynr serve` and the f
 
 - None yet.
 
+## Addenda
+
+2026-11-23, status of the Decision against `develop` at [2be0f4c](https://github.com/eyelock/ynr/commit/2be0f4c99395179f25f55b4267feb242f033412a) (ynr #159):
+
+- **Built: one source, two builds.** The slim and full builds come from one source through a Go
+  build tag ([build_slim.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/build_slim.go), [build_full.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/build_full.go)), and
+  GoReleaser ships both ([.goreleaser.yml](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/.goreleaser.yml)). `ynr info` reports the build
+  and its capabilities. First built in [ynr #1](https://github.com/eyelock/ynr/pull/1).
+- **Built: the commands** `serve`, `central`, `relay`, `info`, `tail`, `query`, `conformance`,
+  `version` and `doctor`, plus `telemetry` (the registry printout, ADR-007), which the command
+  list above omits ([internal/cli/cli.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/cli/cli.go) lines 135 to 160). `--ui` on `central` is refused without
+  sign-in settings ([internal/cli/central.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/cli/central.go)).
+- **Not built: the Collector Builder.** ynr is not built with the OpenTelemetry Collector
+  Builder (`ocb`). Its components are chosen in Go code: `Factories()` in
+  [internal/collector/collector.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/collector/collector.go) registers one receiver
+  (the spool receiver) and the `otlphttp`, `debug` and `nop` exporters, and the Collector is
+  embedded through `otelcol`. The aim, a distribution carrying only the components ynr needs, is
+  met by that code; no builder manifest exists. Changed, not planned: the Decision's wording should
+  read "assembled in code" when the ADRs are consolidated.
+- **Not decided: whether to adopt `ocb`.** No issue exists for it, and none is needed unless a
+  maintainer wants one.
+
 ## History
 
 - 2026-10-05: drafted.
+- 2026-11-23: Addendum records what is built and what is not (ynr #159).

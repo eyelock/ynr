@@ -106,6 +106,32 @@ record claiming either from any other collector, a laptop for instance, is marke
 
 - None of its own; inline-mode strength follows ynf ADR-007's open question on separate users.
 
+## Addenda
+
+2026-11-23, status against `develop` at [2be0f4c](https://github.com/eyelock/ynr/commit/2be0f4c99395179f25f55b4267feb242f033412a) (ynr #159):
+
+- **Built: provenance from the spool folder** (`factory`, `service`, `run`, `local`), stamped
+  over anything the record says ([internal/stamp/stamp.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/stamp/stamp.go),
+  [internal/spool/layout.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/spool/layout.go)); the per-run budget with a provenance
+  warning (`over-budget`); the run manifest, with `no-manifest` and `bad-manifest` warnings.
+- **Built: the hostile-folder reads.** Files are opened without following links, and refused
+  unless they are regular, single-link, on the folder's device and owned by the folder's owner
+  or the manifest's user ([internal/spool/open_unix.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/spool/open_unix.go), lines 38 to 69).
+- **Built: a collector's identity is its own segment.** `ynr.collector.id` is stamped by `ynr serve`
+  from its `--collector-id` setting ([internal/cli/cli.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/cli/cli.go), line 311).
+- **Not built: central's trust list and the `unverified` marking.** Central stamps nothing: it
+  reads `ynr.collector.id` as `ynr serve` wrote it
+  ([internal/query/engine_full.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/query/engine_full.go)), has no list of collectors
+  trusted for `factory` or `service` provenance, and never marks a record `unverified`. The word
+  appears in no code. A laptop's collector can therefore ship `factory` provenance records that
+  central shows as genuine. The explanation page
+  [docs/explanation/provenance-and-stamping.md](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/docs/explanation/provenance-and-stamping.md)
+  repeats the Decision's wording and needs the same correction. No issue exists; a decision is
+  needed: build it, or drop it and say central trusts what its bucket holds.
+- **Not verified here: the mirror of CloudEvents** is ynf's to emit; ynr reads whatever spans it
+  receives and has no code for the mirror.
+
 ## History
 
 - 2026-10-05: drafted.
+- 2026-11-23: Addendum records what is built and what is not (ynr #159).
