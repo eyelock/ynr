@@ -91,8 +91,37 @@ has a name.
 - When do dashboards gain generic views built from any registry, so a new tool's events appear
   with no change to ynr?
 
+## Addenda
+
+2026-11-23, status against `develop` at [2be0f4c](https://github.com/eyelock/ynr/commit/2be0f4c99395179f25f55b4267feb242f033412a) (ynr #159):
+
+- **Built: learning registries.** `ynr serve` runs each configured tool's `telemetry registry
+  --format json` at startup, by bare name on `PATH`, and writes the result to its own prefix as
+  `registries/<collector id>/<tool>/<version>/<sha256>.json`
+  ([internal/registry/learn.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/registry/learn.go),
+  [internal/store/layout.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/store/layout.go);
+  [ynr #31](https://github.com/eyelock/ynr/pull/31), with build metadata handled in
+  [ynr #145](https://github.com/eyelock/ynr/pull/145)).
+- **Built: counting, never rejecting.** Records are checked against the learned registry and names
+  it does not declare are counted and capped; nothing is dropped
+  ([internal/collector/spoolreceiver/receiver.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/collector/spoolreceiver/receiver.go)).
+- **Built: ynr's own registry** in [telemetry/registry](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/telemetry/registry), from which the
+  names are generated ([internal/registry/gen/main.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/registry/gen/main.go)).
+- **Not built: central reading registries.** Registries are written and never read back. The only
+  caller of `store.ParseRegistry` is its test; central has no code that lists `registries/`,
+  applies a trust list, or shows a conflict between two registries for one tool and version.
+- **Not built: dashboards using what tools declare.** No query or page in
+  `internal/query` or `internal/ui` reads registry descriptions, units or enumerations, and no
+  view shows "not reported". The curated views name what they show in code.
+- **Changed: `ynr.registry.unknown_names` is a warning log line,** not the metric that
+  [telemetry/registry/signals.yaml](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/telemetry/registry/signals.yaml)
+  declared at that commit (see ADR-002's addendum). This branch removes the declaration.
+- Dropped: the human dropped both unbuilt items on 2026-11-23, so the registries written to the
+  store have no reader and none will be built.
+
 ## History
 
 - 2026-10-05: drafted.
 - 2026-11-03: a registry may declare a template attribute under its tool's prefix, and a template
   counts as declared for every key.
+- 2026-11-23: Addendum records what is built and what is not (ynr #159).

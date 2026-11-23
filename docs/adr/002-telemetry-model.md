@@ -102,6 +102,38 @@ pattern list kept as data in ynr's configuration.
 - An operator-maintained map joining one person's handles across systems, for example under an
   LDAP id: when, and where it lives.
 
+## Addenda
+
+2026-11-23, status against `develop` at [2be0f4c](https://github.com/eyelock/ynr/commit/2be0f4c99395179f25f55b4267feb242f033412a) (ynr #159):
+
+- **Built: stamping from the folder and the manifest.** `ynr serve` overwrites provenance, the
+  collector's identity, `ynf.lane`, `ynf.lane.harness` and `ynf.lane.focus` and the other factory
+  keys on receipt ([internal/stamp/stamp.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/stamp/stamp.go)), so a run cannot claim
+  another factory.
+- **Built: no content, at the relay.** `ynr relay` strips a fixed list of attributes from every
+  vendor record (emails, working directory, host and process attributes, `tool_input`,
+  `tool_parameters`) and hashes account ids under a key
+  ([internal/relay/scrub.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/relay/scrub.go), [ynr #136](https://github.com/eyelock/ynr/pull/136),
+  [ynr #137](https://github.com/eyelock/ynr/pull/137)). That is the relay's enforcement of
+  ADR-006, not the processor this ADR describes.
+- **Not built: the redaction processor in `ynr serve`.** The Decision says `ynr serve` runs a
+  redaction processor as a second line, with its own pattern list kept as data in ynr's
+  configuration. `Factories()` in [internal/collector/collector.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/collector/collector.go)
+  registers no processor, and no pattern list exists in ynr's configuration. Records from the
+  siblings and the exporters therefore reach the store with only the source's own redaction.
+  Dropped: the human dropped this item on 2026-11-23, so source redaction and the relay are the
+  protection and no processor will be built.
+- **Changed: `ynr.spool.evicted` and `ynr.registry.unknown_names` are warning log lines, not
+  metrics.** At the commit above both were declared as counters in
+  [telemetry/registry/signals.yaml](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/telemetry/registry/signals.yaml) (see ADR-007's addendum), but
+  `ynr serve` only logs them
+  ([internal/collector/spoolreceiver/receiver.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/collector/spoolreceiver/receiver.go),
+  lines 187 and 210) and counts evictions in
+  [internal/spool/counters.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/spool/counters.go); no metric is emitted. Dropped: the human
+  dropped this item on 2026-11-23, so no metric will be emitted for them, and this branch removes both declarations from
+  `telemetry/registry/signals.yaml`.
+
 ## History
 
 - 2026-10-05: drafted.
+- 2026-11-23: Addendum records what is built and what is not (ynr #159).

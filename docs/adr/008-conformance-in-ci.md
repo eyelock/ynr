@@ -97,6 +97,24 @@ as an ordinary step; there is no separate action to maintain, and no token is ne
 
 - None of its own.
 
+## Addenda
+
+2026-11-23, status against `develop` at [2be0f4c](https://github.com/eyelock/ynr/commit/2be0f4c99395179f25f55b4267feb242f033412a) (ynr #159):
+
+- **Built: `ynr conformance` and the stub vendor** ([internal/conformance](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/conformance),
+  [cmd/ynr-stub-vendor](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/cmd/ynr-stub-vendor); [ynr #34](https://github.com/eyelock/ynr/pull/34)),
+  the conformance file, canary strings, and the registry match check (rule 7, own prefix).
+- **Not built: Weaver's live check.** Rule 7 says Weaver's live check passes every record. The
+  checker runs `weaver registry check` on the tool's registry when `weaver` is on `PATH`, and
+  skips with "weaver registry check passed; weaver's live check of the records is not run by this
+  version" ([internal/conformance/checks.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/conformance/checks.go), lines 712 to 727).
+  Names outside the tool's own prefix are therefore not checked against the semantic conventions.
+  The human chose to build it: [ynr #172](https://github.com/eyelock/ynr/issues/172).
+- **Not verified here: the tool-side CI** (the pinned release download in each tool's CI, ynf's
+  full-chain scenario and the scheduled real-vendor job) lives in the sibling repositories and
+  was not checked for this addendum.
+
 ## History
 
 - 2026-10-05: drafted.
+- 2026-11-23: Addendum records what is built and what is not (ynr #159).

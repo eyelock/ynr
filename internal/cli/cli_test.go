@@ -209,10 +209,10 @@ func TestTelemetryRegistryPrintsYnrsNamesInTheShapeEveryToolUses(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &r); err != nil {
 		t.Fatal(err)
 	}
-	if r.Tool != "ynr" || r.Version != ynr.Version || r.Semconv.Version == "" || len(r.Attributes) == 0 || len(r.Metrics) == 0 {
+	if r.Tool != "ynr" || r.Version != ynr.Version || r.Semconv.Version == "" || len(r.Attributes) == 0 {
 		t.Errorf("%+v", r)
 	}
-	if code, out, _ := run("telemetry", "registry"); code != ExitOK || !strings.Contains(out, "ynr.registry.unknown_names") {
+	if code, out, _ := run("telemetry", "registry"); code != ExitOK || !strings.Contains(out, "ynr.registry.name") {
 		t.Errorf("text: %d %q", code, out)
 	}
 	for _, args := range [][]string{{"telemetry"}, {"telemetry", "nope"}, {"telemetry", "registry", "--format", "yaml"}} {

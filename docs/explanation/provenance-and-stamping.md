@@ -68,9 +68,12 @@ the bucket, so the segment is its verified identity, and central stamps `ynr.col
 The job a record came from is data, `ynr.collector.instance`, not identity. ynr also stamps
 `ynr.received_at`, the time it received the record, replacing anything the sender set.
 
-Central's configuration lists which collectors may carry `factory` or `service` provenance. A record
-claiming either from any other collector, a laptop for instance, is marked unverified. The reader
-also accepts only keys of the exact shape, because an IAM policy cannot fix a key's depth.
+Central does not yet check which collectors may carry `factory` or `service` provenance, and it
+marks no record unverified: it reads `ynr.collector.id` as the collector wrote it, so a record
+claiming either from any other collector, a laptop for instance, shows as genuine. The trust list
+was decided against, so central trusts what its bucket holds (see the addendum to
+[ADR-003](../adr/003-control-and-observation-planes.md)). The reader also accepts only keys of the
+exact shape, because an IAM policy cannot fix a key's depth.
 
 ## People appear by their handle
 
