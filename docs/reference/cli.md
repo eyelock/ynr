@@ -251,7 +251,10 @@ ynr conformance [--file .ynr/conformance.yaml] [--format text|json] [--timeout 6
 Exit 1 if any check fails, 30 if the file cannot be read. The stub vendor and the tool under test
 are found by bare name on `PATH`, and so is `ynm`, for rule 13: with it present, each scenario's runs get a
 scratch `YNM_HOME` (other `YNM_*` variables are dropped), and the check fails if `ynm export` shows a record
-added, changed or removed, or a canary in one. Without `ynm` that rule is skipped. The file's format is in
+added, changed or removed, or a canary in one. Without `ynm` that rule is skipped. Every run also starts an
+in-process relay and sends the scrub fixture through it, and fails (exit 1), independent of the scenarios, if a
+scrubbed key or account id reaches the relay's spool: see
+[What the scrub check does](../how-to/add-conformance-to-ci.md#what-the-scrub-check-does). The file's format is in
 [Add ynr conformance to a tool's CI](../how-to/add-conformance-to-ci.md).
 
 ### ynr tail
