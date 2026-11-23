@@ -113,8 +113,9 @@ has a name.
 - **Not built: dashboards using what tools declare.** No query or page in
   `internal/query` or `internal/ui` reads registry descriptions, units or enumerations, and no
   view shows "not reported". The curated views name what they show in code.
-- **Changed: `ynr.registry.unknown_names` is a warning log line,** not the metric declared in
-  [telemetry/registry/signals.yaml](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/telemetry/registry/signals.yaml) (see ADR-002's addendum).
+- **Changed: `ynr.registry.unknown_names` is a warning log line,** not the metric that
+  [telemetry/registry/signals.yaml](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/telemetry/registry/signals.yaml)
+  declared at that commit (see ADR-002's addendum). This branch removes the declaration.
 - Dropped: the human dropped both unbuilt items on 2026-11-23, so the registries written to the
   store have no reader and none will be built.
 

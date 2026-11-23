@@ -123,14 +123,15 @@ pattern list kept as data in ynr's configuration.
   siblings and the exporters therefore reach the store with only the source's own redaction.
   Dropped: the human dropped this item on 2026-11-23, so source redaction and the relay are the
   protection and no processor will be built.
-- **Changed: `ynr.spool.evicted` and `ynr.registry.unknown_names` are declared as metrics but
-  emitted as warning log lines.** Both are declared as counters in
+- **Changed: `ynr.spool.evicted` and `ynr.registry.unknown_names` are warning log lines, not
+  metrics.** At the commit above both were declared as counters in
   [telemetry/registry/signals.yaml](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/telemetry/registry/signals.yaml) (see ADR-007's addendum), but
   `ynr serve` only logs them
   ([internal/collector/spoolreceiver/receiver.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/collector/spoolreceiver/receiver.go),
   lines 187 and 210) and counts evictions in
   [internal/spool/counters.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/spool/counters.go); no metric is emitted. Dropped: the human
-  dropped this item on 2026-11-23, so no metric will be emitted for them.
+  dropped this item on 2026-11-23, so no metric will be emitted for them, and this branch removes both declarations from
+  `telemetry/registry/signals.yaml`.
 
 ## History
 

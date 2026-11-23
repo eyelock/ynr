@@ -65,7 +65,7 @@ func TestOwnRegistryDeclaresWhatYnrWrites(t *testing.T) {
 		have[m.Name] = true
 	}
 	for _, n := range []string{"ynr.provenance", "ynr.provenance.warning", "ynr.collector.id", "ynr.collector.instance",
-		"ynr.registry", "ynr.spool.evicted", "ynr.registry.unknown_names"} {
+		"ynr.registry"} {
 		if !have[n] {
 			t.Errorf("ynr's registry lacks %s", n)
 		}
