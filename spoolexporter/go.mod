@@ -2,6 +2,8 @@ module github.com/eyelock/ynr/spoolexporter
 
 go 1.26.0
 
+toolchain go1.26.11
+
 require (
 	go.opentelemetry.io/otel v1.47.0
 	go.opentelemetry.io/otel/log v1.47.0

@@ -2,6 +2,8 @@ module github.com/eyelock/ynr
 
 go 1.26.0
 
+toolchain go1.26.11
+
 require (
 	github.com/a-h/templ v0.3.1100
 	github.com/aws/aws-sdk-go-v2 v1.47.5
