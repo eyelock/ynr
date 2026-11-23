@@ -179,3 +179,13 @@ tool.
   value per launch, dropped or rolled up by ynr before rollups (ynw-j4a7, option B; ynw-8w20).
 - 2026-11-23: rule 10 names `ynr conformance`'s scrub check as its check that the relay strips
   (ynr #155).
+- 2026-11-23: ynr drops identifying attributes from a data point as it rolls up (ynr #162):
+  `session.id`, `ynh.session.id`, `user.id`, `user.account_uuid`, `user.account_id`,
+  `organization.id`, `gen_ai.conversation.id`, `event.timestamp`, `event.sequence`, and any name
+  ending `.id`, `_id` or `.uuid`, so none is a rollup dimension kept 13 months outside erasure.
+  Each session's cumulative total still counts: series are kept apart by their full attributes
+  and the names are dropped only from the rollup's row. The names come from reading the pinned
+  Claude Code list (`internal/relay/claude-code-attributes.txt`, 2.1.326), which does not say
+  which signal carries a name; the list was not re-probed against a live Claude Code for this
+  change, so the item "check the attribute list against Claude Code's actual metrics" in
+  ynr #162 stays open. Rollups already written keep what they held until re-rolled.
