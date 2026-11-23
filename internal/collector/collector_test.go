@@ -410,3 +410,52 @@ func TestParseHeadersAndEnvErrors(t *testing.T) {
 		t.Errorf("tls not in config: %s %v", cfg, err)
 	}
 }
+
+// TestRefusedUpstreamDoesNotHoldBackTheStore runs the real Collector with a store and an upstream
+// that refuses every connection: many files must all be shipped to the store at the normal poll
+// interval, and deleted only after, so nothing is lost or delayed by the best-effort copy (#157).
+func TestRefusedUpstreamDoesNotHoldBackTheStore(t *testing.T) {
+	dead := httptest.NewServer(http.NotFoundHandler())
+	url := dead.URL
+	dead.Close() // the port now refuses connections
+	root, storeDir := t.TempDir(), t.TempDir()
+	if err := spool.Init(root); err != nil {
+		t.Fatal(err)
+	}
+	const files = 8
+	for i := 0; i < files; i++ {
+		name := filepath.Join(root, "local", "ynh-a-00000"+strconv.Itoa(i)+".jsonl")
+		if err := os.WriteFile(name, []byte(traceLine+"\n"+traceLine+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(ctx, Settings{
+			SpoolRoot: root, PollInterval: 20 * time.Millisecond, MaxLine: spool.DefaultMaxLine,
+			Identity: stamp.Identity{ID: "laptop"}, Store: store.FolderURL(storeDir), Upstream: url,
+		})
+	}()
+	// Sixteen lines through a 5 s retry each took over a minute before the fix; 3 s is ample.
+	deadline := time.Now().Add(3 * time.Second)
+	for len(batches(t, storeDir)) < files {
+		if time.Now().After(deadline) {
+			cancel()
+			t.Fatalf("shipped %d of %d batches within 3 s with the upstream down", len(batches(t, storeDir)), files)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	left, _ := filepath.Glob(filepath.Join(root, "local", "*.jsonl"))
+	for len(left) > 0 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+		left, _ = filepath.Glob(filepath.Join(root, "local", "*.jsonl"))
+	}
+	cancel()
+	if err := <-done; err != nil && !errors.Is(err, context.Canceled) {
+		t.Fatalf("run: %v", err)
+	}
+	if len(left) > 0 {
+		t.Fatalf("shipped files were not deleted: %v", left)
+	}
+}
