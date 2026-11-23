@@ -60,6 +60,8 @@ tool.
     absolute path under it, from traces,
     metrics and logs (resource, scope, span, span event and link, data point and exemplar, and log
     record attributes). They are dropped, not hashed, with one exception: account ids (below).
+    `ynr conformance` checks this: rule 10's scrub check sends a fixture of vendor records carrying
+    these keys through the relay and fails if any reaches the spool raw.
 
     - **Tool details only behind the strip list.** A vendor's tool-detail option (Claude Code's
       `OTEL_LOG_TOOL_DETAILS`) may be on only when its telemetry reaches the spool through
@@ -175,3 +177,5 @@ tool.
   (ynw-17g.27, from the design in ynw-17g.20).
 - 2026-11-09: `ynh.session.id` is the one named exception to rule 8: allowed on vendor metrics, one
   value per launch, dropped or rolled up by ynr before rollups (ynw-j4a7, option B; ynw-8w20).
+- 2026-11-23: rule 10 names `ynr conformance`'s scrub check as its check that the relay strips
+  (ynr #155).
