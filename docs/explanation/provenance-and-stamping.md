@@ -77,6 +77,11 @@ also accepts only keys of the exact shape, because an IAM policy cannot fix a ke
 Records name people by their handle in the system where they acted, qualified by its host, such as
 `github.com/octocat`, in the standard `user.name` attribute, never by name or email. Handles are still
 personal data. Retention bounds them, the central dashboard requires sign-in, and an erasure list
-masks a handle in every query and removes it from the store at the next compaction.
+masks a handle in every query and removes it from the store: at the next compaction for hours inside
+the compaction lookback, and, when the list is new or has changed, in one sweep of every older hour
+inside the retention: on `ynr serve`, its `--retain` (7 days by default); on `ynr central`, `--erase-reach`
+(30 days by default), or `--retain` for a folder store when that is longer. Erasure matches the handle only where it is a `user.name` attribute (on the
+resource or the record) or a record's `actor`; it does not match hashed or raw account ids, display
+names or email addresses, or a handle in any other attribute.
 
 See [ADR-002](../adr/002-telemetry-model.md) and [ADR-003](../adr/003-control-and-observation-planes.md).

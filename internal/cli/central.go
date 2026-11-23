@@ -86,6 +86,7 @@ func centralCmd(ctx context.Context, args []string, stderr io.Writer) int {
 	poll := fs.Duration("poll", 5*time.Second, "how often to poll the store for new batches")
 	lookback := fs.Duration("compact-lookback", 24*time.Hour, "how far back hours are compacted")
 	every := fs.Duration("compact-every", 5*time.Minute, "how often compaction runs")
+	eraseReach := fs.Duration("erase-reach", query.DefaultErasureReach, "how far back an erasure sweep reaches when the --erase list changes; match the bucket's lifecycle expiry")
 	retain := fs.Duration("retain", store.LaptopRetention.Records, "how long a folder store keeps records; a bucket's lifecycle rules do this on S3")
 	retainBytes := fs.Int64("retain-bytes", 0, "the most a folder store's records may take, in bytes (0: no cap)")
 	if err := fs.Parse(args); err != nil {
@@ -178,12 +179,15 @@ func centralCmd(ctx context.Context, args []string, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "ynr: "+format+"\n", args...)
 	}
 	// A bucket's lifecycle rules are its retention (ADR-005); only a folder needs ynr to do it.
+	reach := max(*eraseReach, *lookback)
 	if u, err := url.Parse(*storeURL); err == nil && u.Scheme == "file" {
+		reach = max(reach, *retain) // the sweep reaches every record the folder still keeps
 		stop := startRetention(ctx, *storeURL, store.Retention{Records: *retain, Rollups: store.LaptopRetention.Rollups, MaxBytes: *retainBytes}, stderr)
 		defer stop()
 	}
 	c := query.DefaultCompaction
 	c.Lookback = *lookback
+	c.Retention, c.Swept = reach, &query.SweepMark{}
 	c.Holder = holderID()
 	logf("central on %s: hot tier %s, queries on %s, compacting as %s", r.URL(), *hotWindow, sock, c.Holder)
 	err = query.ServeHot(ctx, query.HotConfig{

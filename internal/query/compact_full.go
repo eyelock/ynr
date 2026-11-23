@@ -26,8 +26,13 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 	var errs []error
 	days := map[time.Time]bool{}   // days whose item index must be rewritten
 	rolled := map[time.Time]bool{} // days whose rollups must be rewritten
+	lookStart := now.Add(-c.Lookback).Truncate(time.Hour)
+	// When the erasure list has changed, hours older than the lookback and inside the retention
+	// are swept too: only an hour that holds an erased handle is compacted there.
+	start, sweepDone := c.sweepStart(now)
 	for _, sig := range signals {
-		for t := now.Add(-c.Lookback).Truncate(time.Hour); !t.After(last); t = t.Add(time.Hour) {
+		for t := start; !t.After(last); t = t.Add(time.Hour) {
+			swept := t.Before(lookStart)
 			h, err := ReadHour(ctx, r, sig.name, t)
 			if err != nil {
 				errs = append(errs, err)
@@ -40,7 +45,7 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 				errs = append(errs, err)
 				continue
 			}
-			if len(h.Batches) > 0 || affected {
+			if (len(h.Batches) > 0 && !swept) || affected {
 				// Take the hour's lease, then read the hour again: another central may have
 				// compacted it since it was listed, and one manifest per round is enough.
 				var did bool
@@ -57,7 +62,7 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 							}
 						}
 						h, affected = cur, aff
-						if len(cur.Batches) == 0 && !aff {
+						if (len(cur.Batches) == 0 || swept) && !aff {
 							return nil
 						}
 						did = true
@@ -87,6 +92,8 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 			keep := c.Keep
 			if affected {
 				keep = 0
+			} else if swept {
+				continue // outside the lookback only erasure touches an hour
 			}
 			errs = append(errs, prune(ctx, r, h, keep, now))
 		}
@@ -105,7 +112,11 @@ func Compact(ctx context.Context, r store.Reader, c Compaction, now time.Time) (
 		}
 	}
 	errs = append(errs, rollUp(ctx, r, c, now, rolled))
-	return compacted, errors.Join(errs...)
+	err = errors.Join(errs...)
+	if err == nil && ctx.Err() == nil {
+		sweepDone()
+	}
+	return compacted, err
 }
 
 // rollUp writes the rollups of each closed day in the lookback whose hours were compacted in
@@ -273,4 +284,31 @@ func prune(ctx context.Context, r store.Reader, h *Hour, keep time.Duration, now
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// erasureSum names the current erasure list, whatever its order.
+func erasureSum() string {
+	h := Erasure()
+	slices.Sort(h)
+	return strings.Join(slices.Compact(h), "\n")
+}
+
+// sweepStart is the first hour Compact visits: the start of the lookback, or the start of the
+// retention when the erasure list is not empty and has changed since the last sweep. done records
+// the sweep, once the pass succeeded.
+func (c Compaction) sweepStart(now time.Time) (start time.Time, done func()) {
+	start = now.Add(-c.Lookback).Truncate(time.Hour)
+	sum := erasureSum()
+	if sum == "" || c.Retention <= c.Lookback {
+		return start, func() {}
+	}
+	if c.Swept != nil && c.Swept.Is(sum) {
+		return start, func() {}
+	}
+	start = now.Add(-c.Retention).Truncate(time.Hour)
+	return start, func() {
+		if c.Swept != nil {
+			c.Swept.Set(sum)
+		}
+	}
 }

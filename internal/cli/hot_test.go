@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestHotPathsKeepTheSocketShort(t *testing.T) {
@@ -36,5 +37,18 @@ func TestPrivateDirRefusesAnOpenFolder(t *testing.T) {
 	}
 	if err := privateDir(dir); err == nil {
 		t.Fatal("accepted a folder others can open")
+	}
+}
+
+func TestServeSweepReachesTheRetentionServeApplies(t *testing.T) {
+	week := 7 * 24 * time.Hour
+	for _, tc := range []struct{ window, retain, want time.Duration }{
+		{week, week, week},
+		{week, 30 * 24 * time.Hour, 30 * 24 * time.Hour},
+		{14 * 24 * time.Hour, week, 14 * 24 * time.Hour},
+	} {
+		if got := serveCompaction(tc.window, tc.retain).Retention; got != tc.want {
+			t.Errorf("window %s, --retain %s: sweep reaches %s, want %s", tc.window, tc.retain, got, tc.want)
+		}
 	}
 }

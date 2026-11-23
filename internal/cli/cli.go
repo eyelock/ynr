@@ -48,7 +48,7 @@ Usage:
             [--max-line <bytes>] [--spool-cap <bytes>] [--hot-window 168h] [--retain 168h] [--retain-bytes <bytes>]
             [--erase <file>] [--ui 127.0.0.1:4319] [--registry-tools ynh,ynf,ynm] [--debug]
   ynr central --store <url> [--hot-window 6h] [--socket <path>] [--state <folder>] [--poll 5s]
-            [--compact-lookback 24h] [--compact-every 5m] [--erase <file>]
+            [--compact-lookback 24h] [--compact-every 5m] [--erase <file>] [--erase-reach 720h]
             [--retain 168h] [--retain-bytes <bytes>]
             [--ui <addr> --oidc-issuer <url> --oidc-client-id <id> --oidc-redirect-url <url>
              --allow-emails <list> | --allow-domain <domain> | --allow-group <group>
@@ -398,7 +398,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		}
 		_, _ = fmt.Fprintf(stderr, "ynr: dashboard at http://%s/\n", uiLn.Addr())
 	}
-	stopHot := startHot(ctx, *root, *storeURL, *hotWindow, *poll, uiLn, stderr)
+	stopHot := startHot(ctx, *root, *storeURL, *hotWindow, *retain, *poll, uiLn, stderr)
 	defer stopHot()
 	stopRetain := startRetention(ctx, *storeURL, store.Retention{Records: *retain, Rollups: store.LaptopRetention.Rollups, MaxBytes: *retainBytes}, stderr)
 	defer stopRetain()

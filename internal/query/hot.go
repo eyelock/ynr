@@ -3,6 +3,7 @@ package query
 import (
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/eyelock/ynr/internal/store"
@@ -39,6 +40,13 @@ type Compaction struct {
 	Keep time.Duration
 	// Lookback is how far back hours are compacted.
 	Lookback time.Duration
+	// Retention is how far back an erasure sweep reaches: when the erasure list changes, every
+	// hour from this far back that holds an erased handle is compacted again without it, though
+	// older than Lookback. Lookback when zero or shorter.
+	Retention time.Duration
+	// Swept, when set, remembers which erasure list the store was last swept for, so the sweep
+	// runs once per change. Nil sweeps on every compaction while the list is not empty.
+	Swept *SweepMark
 	// Holder, when set, makes each hour's compaction take a lease in the store first, under this
 	// identity, so two central instances never compact an hour at once (ADR-005). Empty for a
 	// laptop's ynr serve, the only reader of its folder.
@@ -49,3 +57,27 @@ type Compaction struct {
 
 // DefaultCompaction is ADR-005's defaults, looking back as far as a laptop's hot tier holds.
 var DefaultCompaction = Compaction{Grace: 10 * time.Minute, Keep: time.Hour, Lookback: 7 * 24 * time.Hour}
+
+// DefaultErasureReach is how far back an erasure sweep reaches by default: an S3 bucket's lifecycle
+// rules keep records for 30 days.
+const DefaultErasureReach = 30 * 24 * time.Hour
+
+// SweepMark remembers the erasure list a store was last swept for.
+type SweepMark struct {
+	mu  sync.Mutex
+	sum string
+}
+
+// Is reports whether the store was last swept for this erasure list.
+func (m *SweepMark) Is(sum string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sum == sum
+}
+
+// Set records that the store was swept for this erasure list.
+func (m *SweepMark) Set(sum string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sum = sum
+}
