@@ -22,7 +22,8 @@ const (
   NULL::HUGEINT AS input_tokens, NULL::HUGEINT AS output_tokens, NULL::DOUBLE AS duration_ms`
 	metricRollupCols = `NULL::DATE AS day, NULL::VARCHAR AS name, NULL::VARCHAR AS unit, NULL::VARCHAR AS type,
   NULL::VARCHAR AS temporality, NULL::VARCHAR AS service, NULL::STRUCT(k VARCHAR, v VARCHAR)[] AS attributes,
-  NULL::DOUBLE AS total, NULL::DOUBLE AS count, NULL::DOUBLE AS min, NULL::DOUBLE AS max, NULL::BIGINT AS points`
+  NULL::DOUBLE AS total, NULL::DOUBLE AS count, NULL::DOUBLE AS min, NULL::DOUBLE AS max, NULL::BIGINT AS points,
+  NULL::DATE AS series_start`
 )
 
 // rollDay writes a day's rollups from the hours it was received in, so every record is counted
@@ -56,17 +57,21 @@ FROM spans WHERE name = 'ynh.run' GROUP BY ALL`, day)
 
 // dayMetricsSQL keeps each series apart by its full attributes, so two sessions' cumulative totals
 // both count, then drops the identifying attributes (rollupDimensions) as it writes the day's
-// rows, so none of them becomes a rollup dimension kept for 13 months, outside erasure.
+// rows, so none of them becomes a rollup dimension kept for 13 months, outside erasure. Each row
+// also carries series_start, the day the series started: the month's roll uses it to tell a
+// session that continues from one day to the next from a different session, which the dropped id
+// no longer can.
 func dayMetricsSQL(day string) string {
 	return fmt.Sprintf(`WITH series AS (
   SELECT name, unit, type, temporality, service, attributes, resource, start_time,
+         CAST(start_time AS DATE) AS series_start,
          arg_max(value, time) AS last, sum(value) AS sum, min(value) AS min, max(value) AS max,
          sum(count) AS count, count(*) AS points
   FROM metric_points GROUP BY name, unit, type, temporality, service, attributes, resource, start_time
 )
 SELECT %s AS day, name, unit, type, temporality, service, %s AS attributes,
   sum(CASE WHEN type = 'gauge' THEN NULL WHEN temporality = 'cumulative' THEN last ELSE sum END) AS total,
-  sum(count) AS count, min(min) AS min, max(max) AS max, sum(points) AS points
+  sum(count) AS count, min(min) AS min, max(max) AS max, sum(points) AS points, series_start
 FROM series GROUP BY ALL`, day, rollupDimensions("attributes"))
 }
 
@@ -92,7 +97,8 @@ func rollupDimensions(expr string) string {
 }
 
 // rollMonth writes a month's rollups from its days': run totals summed, and each metric's total
-// summed for delta metrics and taken from the last day for cumulative ones.
+// summed for delta metrics and, for cumulative ones, taken from the last day of each series (told
+// apart by series_start, since the ids are gone) and then summed across series.
 func rollMonth(ctx context.Context, r store.Reader, month time.Time) error {
 	var runs, metrics []string
 	for d := month; d.Month() == month.Month(); d = d.AddDate(0, 0, 1) {
@@ -116,10 +122,15 @@ func rollMonth(ctx context.Context, r store.Reader, month time.Time) error {
 		fmt.Sprintf(`SELECT %s AS day, lane, model, outcome, harness, repo, sum(runs) AS runs, sum(cost_usd) AS cost_usd,
   sum(input_tokens) AS input_tokens, sum(output_tokens) AS output_tokens, sum(duration_ms) AS duration_ms
 FROM run_days GROUP BY ALL`, m),
-		fmt.Sprintf(`SELECT %s AS day, name, unit, type, temporality, service, %s AS attributes,
-  CASE WHEN any_value(temporality) = 'cumulative' THEN arg_max(total, day) ELSE sum(total) END AS total,
-  sum(count) AS count, min(min) AS min, max(max) AS max, sum(points) AS points
-FROM metric_days GROUP BY ALL`, m, rollupDimensions("attributes")))
+		fmt.Sprintf(`WITH sessions AS (
+  SELECT name, unit, type, temporality, service, %s AS attributes, series_start,
+    CASE WHEN any_value(temporality) = 'cumulative' THEN arg_max(total, day) ELSE sum(total) END AS total,
+    sum(count) AS count, min(min) AS min, max(max) AS max, sum(points) AS points
+  FROM metric_days GROUP BY ALL
+)
+SELECT %s AS day, name, unit, type, temporality, service, attributes,
+  sum(total) AS total, sum(count) AS count, min(min) AS min, max(max) AS max, sum(points) AS points
+FROM sessions GROUP BY name, unit, type, temporality, service, attributes`, rollupDimensions("attributes"), m))
 }
 
 func writeRollups(ctx context.Context, r store.Reader, t time.Time, period, setup, runs, metrics string) error {

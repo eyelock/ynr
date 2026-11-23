@@ -183,8 +183,12 @@ tool.
   `session.id`, `ynh.session.id`, `user.id`, `user.account_uuid`, `user.account_id`,
   `organization.id`, `gen_ai.conversation.id`, `event.timestamp`, `event.sequence`, and any name
   ending `.id`, `_id` or `.uuid`, so none is a rollup dimension kept 13 months outside erasure.
-  Each session's cumulative total still counts: series are kept apart by their full attributes
-  and the names are dropped only from the rollup's row. The names come from reading the pinned
+  Each session's cumulative total still counts in the day: series are kept apart by their full
+  attributes and the names are dropped only from the rollup's row. In the month it counts only as
+  far as the series can be told apart without an id: each daily row carries `series_start` (the
+  day the series started), the month keeps each series' last day and sums them, and two series
+  that share every kept attribute and start on the same day are counted as one, so the month can
+  undercount then. The names come from reading the pinned
   Claude Code list (`internal/relay/claude-code-attributes.txt`, 2.1.326), which does not say
   which signal carries a name; the list was not re-probed against a live Claude Code for this
   change, so the item "check the attribute list against Claude Code's actual metrics" in
