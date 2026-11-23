@@ -100,9 +100,22 @@ A Parquet file for each day with a row for each item and step in each hour: `ite
 
 ### Rollups
 
-Daily and monthly aggregates of every metric by its attributes, and of every run (`ynh.run`) by lane,
-model, outcome, harness and repository, with run counts, cost and token totals. A day is rolled up by
-the hours it was received in, so a record is counted on one day.
+Daily and monthly aggregates of every metric by its attributes, less the identifying ones below, and
+of every run (`ynh.run`) by lane, model, outcome, harness and repository, with run counts, cost and
+token totals. A day is rolled up by the hours it was received in, so a record is counted on one day.
+
+Rollups are kept 13 months, outside erasure, so identifying attributes on a data point are dropped
+from the rollup rows: `session.id`, `ynh.session.id`, `user.id`, `user.account_uuid`,
+`user.account_id`, `organization.id`, `gen_ai.conversation.id`, `event.timestamp`, `event.sequence`,
+and any name ending `.id`, `_id` or `.uuid`. The list is read from the pinned Claude Code attribute
+list, not re-probed against a live Claude Code
+([ADR-006](../adr/006-sibling-instrumentation-contract.md) has the history). Rollups written before
+this change keep what they held until their day is rolled up again.
+
+A daily metric row carries a `series_start` column: the day its series started. The monthly rollup
+keeps each series' last day and sums them, telling series apart by their kept attributes and
+`series_start`. Two series that share every kept attribute and start on the same day are counted as
+one, so the month can undercount then. Day granularity is accepted, and the undercount is rare.
 
 ### Leases
 
