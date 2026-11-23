@@ -165,3 +165,44 @@ func TestErasureIsVisibleInQueries(t *testing.T) {
 	compact(t, r, now)
 	check("compacted", "(erased)")
 }
+
+// TestErasureSweepsBeyondTheLookback: when the erasure list changes, a part older than the
+// lookback but inside the retention is rewritten without the erased handle, once per change.
+func TestErasureSweepsBeyondTheLookback(t *testing.T) {
+	defer SetErasure(nil)
+	dir := t.TempDir()
+	r, err := store.OpenReader(store.FolderURL(dir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hour := now.Truncate(time.Hour).Add(-10 * 24 * time.Hour) // far outside the 24 h lookback
+	ship(t, r, store.Traces, hour.Add(10*time.Minute), "local.a", traceLine(t,
+		actorSpan("1111111111111111", "github.com/alice", hour.Add(time.Minute)),
+		actorSpan("2222222222222222", "github.com/bob", hour.Add(2*time.Minute))))
+	c := Compaction{Grace: 10 * time.Minute, Keep: time.Hour, Lookback: 24 * time.Hour, Retention: 30 * 24 * time.Hour, Swept: &SweepMark{}}
+	// The hour is compacted while it is still inside the lookback.
+	if _, err := Compact(context.Background(), r, Compaction{Grace: c.Grace, Keep: c.Keep, Lookback: 11 * 24 * time.Hour}, now); err != nil {
+		t.Fatal(err)
+	}
+	if raw := rawActors(t, dir); raw != 1 {
+		t.Fatalf("before erasure the part holds alice %d times", raw)
+	}
+
+	if _, err := Compact(context.Background(), r, c, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if raw := rawActors(t, dir); raw != 1 {
+		t.Fatalf("with no erasure list the old hour was touched (%d)", raw)
+	}
+	SetErasure([]string{"github.com/alice"})
+	n, err := Compact(context.Background(), r, c, now.Add(2*time.Minute))
+	if err != nil || n != 1 {
+		t.Fatalf("sweep compacted %d hours (%v)", n, err)
+	}
+	if raw := rawActors(t, dir); raw != 0 {
+		t.Fatalf("after the sweep the old part still holds alice %d times", raw)
+	}
+	if n, err := Compact(context.Background(), r, c, now.Add(3*time.Minute)); err != nil || n != 0 {
+		t.Fatalf("a second pass compacted %d hours (%v)", n, err)
+	}
+}

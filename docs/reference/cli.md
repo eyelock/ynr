@@ -102,7 +102,7 @@ path is too long for a socket. `ynr query` and `ynr doctor` derive the same path
 
 ```
 ynr central --store <url> [--hot-window 6h] [--socket <path>] [--state <folder>] [--poll 5s]
-            [--compact-lookback 24h] [--compact-every 5m] [--erase <file>]
+            [--compact-lookback 24h] [--compact-every 5m] [--erase <file>] [--erase-reach 720h]
             [--ui <addr> --oidc-issuer <url> --oidc-client-id <id> --oidc-redirect-url <url>
              --allow-emails <list> | --allow-domain <domain> | --allow-group <group>
              [--group-claim groups] [--session-ttl 8h]]
@@ -121,6 +121,7 @@ ynr central --store <url> [--hot-window 6h] [--socket <path>] [--state <folder>]
 | `--compact-lookback` | `24h` | How far back hours are compacted. |
 | `--compact-every` | `5m` | How often compaction runs. |
 | `--erase` | none | A file of handles to erase. `YNR_ERASE`. |
+| `--erase-reach` | `720h` | How far back the sweep reaches when the `--erase` list is new or changed, past `--compact-lookback`. Match the bucket's lifecycle expiry (30 days by default). |
 | `--ui` | off | Serves the dashboard behind sign-in on this address, such as `0.0.0.0:4320`. Refused unless sign-in is configured. `YNR_UI`. |
 | `--oidc-issuer` | none | The OpenID Connect issuer URL. `YNR_OIDC_ISSUER`. |
 | `--oidc-client-id` | none | The client id registered with the issuer. `YNR_OIDC_CLIENT_ID`. |

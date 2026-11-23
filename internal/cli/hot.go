@@ -87,6 +87,7 @@ func startHot(ctx context.Context, root, storeURL string, window, poll time.Dura
 		defer close(done)
 		c := query.DefaultCompaction
 		c.Lookback = window
+		c.Retention, c.Swept = max(window, store.LaptopRetention.Records), &query.SweepMark{}
 		cfg := query.HotConfig{Path: db, Socket: socket, Store: r, Window: window,
 			Poll: max(poll, 2*time.Second), Compact: &c, Logf: logf}
 		if uiLn != nil {

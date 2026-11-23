@@ -65,12 +65,14 @@ ynr query runs --erase ~/erase.txt        # a direct read of the store with no s
 `YNR_ERASE` sets it for each. A bad line stops the command with exit code 30 and names the line.
 
 From then on the named handle reads as `(erased)` wherever it is the value of a `user.name` attribute. At the next compaction, ynr
-re-compacts the hours and rollups that hold the handle without it, then deletes the superseded parts
+re-compacts the hours that hold the handle without it, sweeping every hour inside the retention
+(`--erase-reach`, 30 days on central) when the list is new or changed, not only the compaction lookback, then deletes the superseded parts
 and the batch files for those hours, rather than leaving them superseded. If the bucket keeps object
 versions, the Terraform expires noncurrent versions after a day (`noncurrent_version_days`), so a
 deleted object does not linger.
 
-Erasure reaches the object store and the hot tiers. It does not reach collector spools, which hold
+Erasure keys on the handle in a `user.name` attribute or a record's `actor`, nothing else: not hashed
+or raw account ids, names or emails. Erasure reaches the object store and the hot tiers. It does not reach collector spools, which hold
 data only until it is committed; ynf's run captures, under ynf's retention; a laptop's own folders
 outside the store; or any upstream OTLP backend you forward to with `--upstream`, which is yours to
 clear.
