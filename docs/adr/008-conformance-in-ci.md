@@ -109,7 +109,7 @@ as an ordinary step; there is no separate action to maintain, and no token is ne
   skips with "weaver registry check passed; weaver's live check of the records is not run by this
   version" ([internal/conformance/checks.go](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/internal/conformance/checks.go), lines 712 to 727).
   Names outside the tool's own prefix are therefore not checked against the semantic conventions.
-  No issue exists; a decision is needed: build the live check, or narrow rule 7.
+  The human chose to build it: [ynr #172](https://github.com/eyelock/ynr/issues/172).
 - **Not verified here: the tool-side CI** (the pinned release download in each tool's CI, ynf's
   full-chain scenario and the scheduled real-vendor job) lives in the sibling repositories and
   was not checked for this addendum.

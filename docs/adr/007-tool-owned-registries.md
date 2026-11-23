@@ -115,8 +115,8 @@ has a name.
   view shows "not reported". The curated views name what they show in code.
 - **Changed: `ynr.registry.unknown_names` is a warning log line,** not the metric declared in
   [telemetry/registry/signals.yaml](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/telemetry/registry/signals.yaml) (see ADR-002's addendum).
-- No issue exists for the two unbuilt items. A decision is needed: build them, or drop them from
-  the Decision, in which case the registries written to the store have no reader.
+- Dropped: the human dropped both unbuilt items on 2026-11-23, so the registries written to the
+  store have no reader and none will be built.
 
 ## History
 

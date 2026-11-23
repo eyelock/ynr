@@ -107,8 +107,8 @@ There are two flavours over one UI: the local dashboard in `ynr serve` and the f
   embedded through `otelcol`. The aim, a distribution carrying only the components ynr needs, is
   met by that code; no builder manifest exists. Changed, not planned: the Decision's wording should
   read "assembled in code" when the ADRs are consolidated.
-- **Not decided: whether to adopt `ocb`.** No issue exists for it, and none is needed unless a
-  maintainer wants one.
+- **Dropped: adopting `ocb`.** The human dropped this item on 2026-11-23: no builder will be
+  adopted, and the Decision's "builder" wording stands as the assembled-in-code design above.
 
 ## History
 

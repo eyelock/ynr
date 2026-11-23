@@ -126,8 +126,8 @@ record claiming either from any other collector, a laptop for instance, is marke
   appears in no code. A laptop's collector can therefore ship `factory` provenance records that
   central shows as genuine. The explanation page
   [docs/explanation/provenance-and-stamping.md](https://github.com/eyelock/ynr/blob/2be0f4c99395179f25f55b4267feb242f033412a/docs/explanation/provenance-and-stamping.md)
-  repeats the Decision's wording and needs the same correction. No issue exists; a decision is
-  needed: build it, or drop it and say central trusts what its bucket holds.
+  repeats the Decision's wording and needs the same correction. Dropped: the human
+  dropped this item on 2026-11-23, so central trusts what its bucket holds and no trust list will be built.
 - **Not verified here: the mirror of CloudEvents** is ynf's to emit; ynr reads whatever spans it
   receives and has no code for the mirror.
 
