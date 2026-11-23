@@ -27,6 +27,9 @@ type Options struct {
 	// Env is set in every scenario's environment, after the inherited one: for tests, which
 	// need not change their own.
 	Env map[string]string
+	// Relay starts the relay the scrub check (rule 10) sends its fixture through; empty takes
+	// the relay compiled into this binary.
+	Relay RelayStarter
 	// Keep leaves the temporary folders in place, and names them in the report.
 	Keep bool
 }
@@ -89,6 +92,7 @@ func Run(ctx context.Context, o Options) (*Report, error) {
 		defer func() { _ = os.RemoveAll(root) }()
 	}
 
+	scrubbed := runScrub(ctx, root, o.Relay)
 	for i, sc := range f.Scenarios {
 		sb := &sandbox{
 			root: filepath.Join(root, fmt.Sprintf("scenario-%d", i+1)), service: f.Service,
@@ -126,7 +130,7 @@ func Run(ctx context.Context, o Options) (*Report, error) {
 		if mem.path != "" && mem.err == nil {
 			mem.after, mem.err = sb.snapshotMemory(ctx, mem.path)
 		}
-		k := &checker{f: f, sc: sc, o: o, reg: reg, regErr: regErr, runs: runs, planted: can.planted(sc.Run), mem: mem}
+		k := &checker{f: f, sc: sc, o: o, reg: reg, regErr: regErr, runs: runs, planted: can.planted(sc.Run), mem: mem, scrubbed: scrubbed}
 		sr.Checks = k.all()
 		sr.Review = append(reviewLines("spool", runs[runSpool].Spool), reviewLines("operator endpoint", runs[runEndpoint].Endpoint)...)
 		rep.Scenarios = append(rep.Scenarios, sr)

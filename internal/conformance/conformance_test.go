@@ -183,14 +183,27 @@ func TestCanaryNotInReport(t *testing.T) {
 	}
 }
 
-// TestScenarioWithoutCanary: with nothing planted, rule 10 says it could not check.
+// TestScenarioWithoutCanary: with nothing planted, rule 10's canary check says it could not check,
+// while its scrub check (which plants its own fixture) still runs and passes.
 func TestScenarioWithoutCanary(t *testing.T) {
 	rep := runScenarios(t, `  - name: plain
     run: fake run --task hello
     expect: { outcome: converged }
 `, nil)
-	if got := rule(rep, 10); got.Status != Skipped {
-		t.Errorf("rule 10: %s, want skipped", got.Status)
+	var canary, scrub *Check
+	for i, c := range rep.Scenarios[0].Checks {
+		switch {
+		case c.Rule == 10 && c.Name == "no content":
+			canary = &rep.Scenarios[0].Checks[i]
+		case c.Rule == 10 && c.Name == "scrubbed keys stay out of the spool":
+			scrub = &rep.Scenarios[0].Checks[i]
+		}
+	}
+	if canary == nil || canary.Status != Skipped {
+		t.Errorf("rule 10 canary check: %+v, want skipped", canary)
+	}
+	if scrub == nil || scrub.Status != Pass {
+		t.Errorf("rule 10 scrub check: %+v, want pass", scrub)
 	}
 }
 

@@ -26,7 +26,7 @@ reads what was written, and checks how the tool behaved:
 | 5 Started events | every unit-of-work span has a matching `started` event; a scenario killed mid-run leaves its `started` event and every batch written before the kill |
 | 7 Names | `<tool> telemetry registry --format json` matches the tool's own registry, and Weaver's live check passes every record against it |
 | 8 Cardinality | no metric attribute exceeds the limit its registry declares (a `ynr.cardinality` annotation on the attribute), and none looks like an id (ULIDs, UUIDs, hashes, item keys) |
-| 10 No content | canary strings planted in the inputs (prompt, ticket text, file contents, memory bodies, a fake secret) never appear in any record |
+| 10 No content | canary strings planted in the inputs (prompt, ticket text, file contents, memory bodies, a fake secret) never appear in any record ; and a fixture of vendor records carrying `cwd`, `host.name`, `user.email`, `tool_input`, `tool_parameters` and the four account ids is sent through the relay, and none of those keys, nor an account id's raw value, reaches the spool (the scrub check) |
 | 11 Outcomes | each unit-of-work span ends with an outcome from the tool's own vocabulary and a matching status |
 | 12 Never blocks | with the spool on a full filesystem, and with an operator endpoint that accepts connections and never answers, the exit code is unchanged and the tool exits within its normal time plus the flush limit |
 | 13 Never into memory | with ynm in the test, ynm's store holds the same records before and after the scenario, apart from those the scenario writes on purpose, and contains no canary string |

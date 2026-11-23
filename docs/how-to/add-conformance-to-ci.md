@@ -107,6 +107,17 @@ the whole report; `--keep` keeps the temporary spools for looking at what was wr
 bounds one run of a scenario (60 seconds by default) and `--flush-limit` is the tool's bound on its
 flush at exit (2 seconds by default).
 
+## What the scrub check does
+
+Rule 10 has a second check beside the canary strings. Every run of `ynr conformance` starts the
+relay in its own build, sends it a fixture of vendor records (a span, a metric and a log record)
+carrying `cwd`, `host.name`, `user.email`, `tool_input`, `tool_parameters` and the four account ids
+(`user.id`, `user.account_uuid`, `user.account_id`, `organization.id`), and reads the spool the relay
+wrote. It fails if any of those keys is still there, or if an account id's raw value is, and also
+if the fixture never reached the spool. It needs no scenario and no setting, and it runs once per
+scenario in the report. It checks the relay that ships in the `ynr` you pinned, so bumping the pin brings the check, and
+the relay it checks, together.
+
 ## What rule 13 checks
 
 When `ynm` is on `PATH`, every run of a scenario gets its own empty `YNM_HOME`, and any other `YNM_*`

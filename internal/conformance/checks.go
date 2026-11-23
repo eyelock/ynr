@@ -16,15 +16,16 @@ import (
 
 // checker runs the rule checks for one scenario over the runs it made.
 type checker struct {
-	f       *File
-	sc      Scenario
-	o       Options
-	reg     *Registry
-	regErr  error
-	runs    map[string]*runOutcome
-	planted map[string]string
-	mem     memoryState
-	checks  []Check
+	f        *File
+	sc       Scenario
+	o        Options
+	reg      *Registry
+	regErr   error
+	runs     map[string]*runOutcome
+	planted  map[string]string
+	mem      memoryState
+	scrubbed scrubResult
+	checks   []Check
 }
 
 func (k *checker) add(rule int, st Status, name, detail string, evidence ...string) {
@@ -66,6 +67,7 @@ func (k *checker) all() []Check {
 	k.rule7()
 	k.rule8()
 	k.rule10()
+	k.scrub()
 	k.rule11()
 	k.rule12()
 	k.rule13()
