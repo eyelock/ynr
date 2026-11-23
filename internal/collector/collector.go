@@ -75,6 +75,9 @@ func Factories() (otelcol.Factories, error) {
 	}, nil
 }
 
+// upstreamQueueSize bounds the in-memory queue of the best-effort upstream copy when a store is set.
+const upstreamQueueSize = 1000
+
 // Config builds the Collector's configuration. It is JSON, which is also YAML.
 func Config(s Settings) (string, error) {
 	if s.Upstream == "" && s.Store == "" {
@@ -91,11 +94,17 @@ func Config(s Settings) (string, error) {
 			// A best-effort copy: a short retry, so a slow upstream delays shipping little.
 			retry = map[string]any{"enabled": true, "initial_interval": "1s", "max_interval": "2s", "max_elapsed_time": "5s"}
 		}
+		// Synchronous: without a store, a line is committed only once the upstream has
+		// accepted it (ADR-004).
+		queue := map[string]any{"enabled": false}
+		if s.Store != "" {
+			// A best-effort copy never holds the spool back (ADR-004): the line is queued and
+			// retried off the reader's path, and a full queue drops the copy rather than blocking.
+			queue = map[string]any{"enabled": true, "num_consumers": 1, "queue_size": upstreamQueueSize, "block_on_overflow": false}
+		}
 		up := map[string]any{
-			"endpoint": s.Upstream,
-			// Synchronous: without a store, a line is committed only once the upstream has
-			// accepted it (ADR-004).
-			"sending_queue":    map[string]any{"enabled": false},
+			"endpoint":         s.Upstream,
+			"sending_queue":    queue,
 			"retry_on_failure": retry,
 		}
 		if len(s.UpstreamHeaders) > 0 {
