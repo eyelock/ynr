@@ -79,8 +79,8 @@ Records name people by their handle in the system where they acted, qualified by
 personal data. Retention bounds them, the central dashboard requires sign-in, and an erasure list
 masks a handle in every query and removes it from the store: at the next compaction for hours inside
 the compaction lookback, and, when the list is new or has changed, in one sweep of every older hour
-inside the retention (`--erase-reach` on `ynr central`, 30 days by default; a laptop's `ynr serve`
-sweeps its seven days). Erasure matches the handle only where it is a `user.name` attribute (on the
+inside the retention: on `ynr serve`, its `--retain` (7 days by default); on `ynr central`, `--erase-reach`
+(30 days by default), or `--retain` for a folder store when that is longer. Erasure matches the handle only where it is a `user.name` attribute (on the
 resource or the record) or a record's `actor`; it does not match hashed or raw account ids, display
 names or email addresses, or a handle in any other attribute.
 

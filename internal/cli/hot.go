@@ -58,10 +58,20 @@ func privateDir(dir string) error {
 	return nil
 }
 
+// serveCompaction is the compaction ynr serve runs: its erasure sweep reaches the records
+// retention serve itself applies (--retain), never less, so no record serve still keeps holds an
+// erased handle.
+func serveCompaction(window, retain time.Duration) query.Compaction {
+	c := query.DefaultCompaction
+	c.Lookback = window
+	c.Retention, c.Swept = max(window, retain), &query.SweepMark{}
+	return c
+}
+
 // startHot runs the hot tier beside ynr serve when the build has DuckDB and the store can be
 // read, and compacts the store: a laptop's ynr serve is its folder's only reader (ADR-005). It never stops serve shipping: a failure is reported and serve carries on. The caller
 // holds the spool's lock, so no other server owns the hot tier's files.
-func startHot(ctx context.Context, root, storeURL string, window, poll time.Duration, uiLn net.Listener, stderr io.Writer) (stop func()) {
+func startHot(ctx context.Context, root, storeURL string, window, retain, poll time.Duration, uiLn net.Listener, stderr io.Writer) (stop func()) {
 	if storeURL == "" {
 		return func() {}
 	}
@@ -85,9 +95,7 @@ func startHot(ctx context.Context, root, storeURL string, window, poll time.Dura
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		c := query.DefaultCompaction
-		c.Lookback = window
-		c.Retention, c.Swept = max(window, store.LaptopRetention.Records), &query.SweepMark{}
+		c := serveCompaction(window, retain)
 		cfg := query.HotConfig{Path: db, Socket: socket, Store: r, Window: window,
 			Poll: max(poll, 2*time.Second), Compact: &c, Logf: logf}
 		if uiLn != nil {

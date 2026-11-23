@@ -396,7 +396,7 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		}
 		_, _ = fmt.Fprintf(stderr, "ynr: dashboard at http://%s/\n", uiLn.Addr())
 	}
-	stopHot := startHot(ctx, *root, *storeURL, *hotWindow, *poll, uiLn, stderr)
+	stopHot := startHot(ctx, *root, *storeURL, *hotWindow, *retain, *poll, uiLn, stderr)
 	defer stopHot()
 	stopRetain := startRetention(ctx, *storeURL, store.Retention{Records: *retain, Rollups: store.LaptopRetention.Rollups, MaxBytes: *retainBytes}, stderr)
 	defer stopRetain()

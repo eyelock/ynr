@@ -66,8 +66,11 @@ ynr query runs --erase ~/erase.txt        # a direct read of the store with no s
 
 From then on the named handle reads as `(erased)` wherever it is the value of a `user.name` attribute. At the next compaction, ynr
 re-compacts the hours that hold the handle without it, sweeping every hour inside the retention
-(`--erase-reach`, 30 days on central) when the list is new or changed, not only the compaction lookback, then deletes the superseded parts
-and the batch files for those hours, rather than leaving them superseded. If the bucket keeps object
+when the list is new or changed, not only the compaction lookback, then deletes the superseded parts
+and the batch files for those hours, rather than leaving them superseded. The sweep reaches the
+longest of what the process keeps: on `ynr serve`, `--retain` (7 days by default) or `--hot-window` if longer; on
+`ynr central`, `--erase-reach` (30 days) or `--compact-lookback` if longer, and, for a folder store, `--retain` if
+longer still. On an S3 store the bucket's lifecycle expiry is the retention, so keep `--erase-reach` at least as long. If the bucket keeps object
 versions, the Terraform expires noncurrent versions after a day (`noncurrent_version_days`), so a
 deleted object does not linger.
 

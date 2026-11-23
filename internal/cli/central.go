@@ -179,13 +179,15 @@ func centralCmd(ctx context.Context, args []string, stderr io.Writer) int {
 		_, _ = fmt.Fprintf(stderr, "ynr: "+format+"\n", args...)
 	}
 	// A bucket's lifecycle rules are its retention (ADR-005); only a folder needs ynr to do it.
+	reach := max(*eraseReach, *lookback)
 	if u, err := url.Parse(*storeURL); err == nil && u.Scheme == "file" {
+		reach = max(reach, *retain) // the sweep reaches every record the folder still keeps
 		stop := startRetention(ctx, *storeURL, store.Retention{Records: *retain, Rollups: store.LaptopRetention.Rollups, MaxBytes: *retainBytes}, stderr)
 		defer stop()
 	}
 	c := query.DefaultCompaction
 	c.Lookback = *lookback
-	c.Retention, c.Swept = max(*eraseReach, c.Lookback), &query.SweepMark{}
+	c.Retention, c.Swept = reach, &query.SweepMark{}
 	c.Holder = holderID()
 	logf("central on %s: hot tier %s, queries on %s, compacting as %s", r.URL(), *hotWindow, sock, c.Holder)
 	err = query.ServeHot(ctx, query.HotConfig{

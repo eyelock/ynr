@@ -168,20 +168,29 @@ func TestErasureIsVisibleInQueries(t *testing.T) {
 
 // TestErasureSweepsBeyondTheLookback: when the erasure list changes, a part older than the
 // lookback but inside the retention is rewritten without the erased handle, once per change.
-func TestErasureSweepsBeyondTheLookback(t *testing.T) {
+func TestErasureSweepsBeyondTheLookback(t *testing.T) { sweepsAPartOlderThan(t, 10*24*time.Hour) }
+
+// TestErasureSweepsAPartInsideALongerRetention: a part older than the 7-day default but inside a
+// longer --retain is swept, not left holding the erased handle.
+func TestErasureSweepsAPartInsideALongerRetention(t *testing.T) {
+	sweepsAPartOlderThan(t, 20*24*time.Hour)
+}
+
+func sweepsAPartOlderThan(t *testing.T, age time.Duration) {
+	t.Helper()
 	defer SetErasure(nil)
 	dir := t.TempDir()
 	r, err := store.OpenReader(store.FolderURL(dir))
 	if err != nil {
 		t.Fatal(err)
 	}
-	hour := now.Truncate(time.Hour).Add(-10 * 24 * time.Hour) // far outside the 24 h lookback
+	hour := now.Truncate(time.Hour).Add(-age) // far outside the 24 h lookback
 	ship(t, r, store.Traces, hour.Add(10*time.Minute), "local.a", traceLine(t,
 		actorSpan("1111111111111111", "github.com/alice", hour.Add(time.Minute)),
 		actorSpan("2222222222222222", "github.com/bob", hour.Add(2*time.Minute))))
 	c := Compaction{Grace: 10 * time.Minute, Keep: time.Hour, Lookback: 24 * time.Hour, Retention: 30 * 24 * time.Hour, Swept: &SweepMark{}}
 	// The hour is compacted while it is still inside the lookback.
-	if _, err := Compact(context.Background(), r, Compaction{Grace: c.Grace, Keep: c.Keep, Lookback: 11 * 24 * time.Hour}, now); err != nil {
+	if _, err := Compact(context.Background(), r, Compaction{Grace: c.Grace, Keep: c.Keep, Lookback: age + 24*time.Hour}, now); err != nil {
 		t.Fatal(err)
 	}
 	if raw := rawActors(t, dir); raw != 1 {
