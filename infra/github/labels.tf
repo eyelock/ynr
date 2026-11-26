@@ -1,5 +1,5 @@
 # Authoritative: a label created in the UI and not listed here is removed on apply. GitHub's
-# defaults plus the labels Dependabot creates; ynr's own labels arrive with the features that use them.
+# defaults, the labels Dependabot creates, and the labels the seats use (merge:, priority:, audit, security, terraform).
 locals {
   labels = {
     "accessibility"    = { color = "f143ab", description = "Barrier affecting people with disabilities" }
@@ -16,6 +16,17 @@ locals {
     "javascript"       = { color = "168700", description = "Pull requests that update javascript code" }
     "question"         = { color = "d876e3", description = "Further information is requested" }
     "wontfix"          = { color = "ffffff", description = "This will not be worked on" }
+
+    # Labels the review and planning seats read; declared so an apply never deletes them.
+    "merge: squash"       = { color = "0E8A16", description = "Merge this pull request with squash" }
+    "merge: merge commit" = { color = "1D76DB", description = "Merge this pull request with a merge commit" }
+    "audit: 2026-11"      = { color = "5319e7", description = "Finding of the 2026-11-21 engineering audit" }
+    "priority: P1"        = { color = "b60205", description = "Fix in the next patch release" }
+    "priority: P2"        = { color = "d93f0b", description = "Fix in the next minor release" }
+    "priority: P3"        = { color = "fbca04", description = "Worth doing; next minor or later" }
+    "priority: P4"        = { color = "c2e0c6", description = "Low; when convenient" }
+    "security"            = { color = "ee0701", description = "Security or privacy" }
+    "terraform"           = { color = "5c4ee5", description = "Pull requests that update Terraform code" }
   }
 }
 
