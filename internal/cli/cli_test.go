@@ -209,10 +209,10 @@ func TestTelemetryRegistryPrintsYnrsNamesInTheShapeEveryToolUses(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &r); err != nil {
 		t.Fatal(err)
 	}
-	if r.Tool != "ynr" || r.Version != ynr.Version || r.Semconv.Version == "" || len(r.Attributes) == 0 || len(r.Metrics) == 0 {
+	if r.Tool != "ynr" || r.Version != ynr.Version || r.Semconv.Version == "" || len(r.Attributes) == 0 {
 		t.Errorf("%+v", r)
 	}
-	if code, out, _ := run("telemetry", "registry"); code != ExitOK || !strings.Contains(out, "ynr.registry.unknown_names") {
+	if code, out, _ := run("telemetry", "registry"); code != ExitOK || !strings.Contains(out, "ynr.registry.name") {
 		t.Errorf("text: %d %q", code, out)
 	}
 	for _, args := range [][]string{{"telemetry"}, {"telemetry", "nope"}, {"telemetry", "registry", "--format", "yaml"}} {
@@ -265,6 +265,25 @@ func TestQueryUsageNamesItsFlags(t *testing.T) {
 	for _, m := range regexp.MustCompile(`(?m)^\s+-([a-z][a-z-]*)`).FindAllStringSubmatch(help, -1) {
 		if !strings.Contains(block, "--"+m[1]) {
 			t.Errorf("the ynr query usage does not mention --%s", m[1])
+		}
+	}
+}
+
+// `ynr query` and `ynr query --help` list every flag the query command takes, so the listing
+// cannot drift from the flags the code defines (ynr #123).
+func TestQueryHelpListsEveryFlag(t *testing.T) {
+	_, _, flagHelp := run("query", "runs", "-h")
+	flagLine := regexp.MustCompile(`(?m)^\s+-([a-z][a-z-]*)`)
+	found := flagLine.FindAllStringSubmatch(flagHelp, -1)
+	if len(found) == 0 {
+		t.Fatalf("ynr query runs -h listed no flags:\n%s", flagHelp)
+	}
+	for _, args := range [][]string{{"query"}, {"query", "--help"}, {"query", "-h"}} {
+		_, out, _ := run(args...)
+		for _, m := range found {
+			if !strings.Contains(out, "--"+m[1]) {
+				t.Errorf("ynr %s does not list --%s", strings.Join(args, " "), m[1])
+			}
 		}
 	}
 }
@@ -366,6 +385,7 @@ func fakeYnh(t *testing.T, attrs ...string) {
 func TestRelayResourceAttrRefusals(t *testing.T) {
 	fakeYnh(t, "ynh.session.id")
 	cases := map[string][]string{
+		"standing":    {"relay", "--spool", t.TempDir(), "--listen", "127.0.0.1:47831", "--resource-attr", "ynh.session.id=x"},
 		"undeclared":  {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.other=x"},
 		"standard":    {"relay", "--spool", t.TempDir(), "--resource-attr", "service.name=x"},
 		"no tool":     {"relay", "--spool", t.TempDir(), "--resource-attr", "ynh.session.id=x", "--registry-tools", "ynr-no-such-tool"},
@@ -377,6 +397,9 @@ func TestRelayResourceAttrRefusals(t *testing.T) {
 		var out, errb bytes.Buffer
 		if code := Run(context.Background(), args, &out, &errb); code == ExitOK {
 			t.Errorf("%s: exit 0, stderr %q", name, errb.String())
+		}
+		if name == "standing" && !strings.Contains(errb.String(), "per-launch relay") {
+			t.Errorf("standing: stderr %q does not say only a per-launch relay stamps", errb.String())
 		}
 		if out.Len() != 0 {
 			t.Errorf("%s: printed an endpoint: %q", name, out.String())
@@ -436,6 +459,39 @@ func TestRelayRefusesMisdeclaredAndStrippedKeys(t *testing.T) {
 		}
 		if !strings.Contains(errb.String(), key) || !strings.Contains(errb.String(), "own prefix") {
 			t.Errorf("%s: unclear message %q", key, errb.String())
+		}
+	}
+}
+
+// TestCommandsRefuseStrayArguments: a positional argument no command takes is refused with exit 2
+// and a message naming it, before the command does anything (ynr #127). The case that bit was a
+// relay started with `resource-attr k=v`, the dashes forgotten, which ran without the stamp.
+func TestCommandsRefuseStrayArguments(t *testing.T) {
+	spool := t.TempDir()
+	for name, args := range map[string][]string{
+		"version":            {"version", "extra"},
+		"--version":          {"--version", "extra"},
+		"info":               {"info", "--spool", spool, "extra"},
+		"doctor":             {"doctor", "extra"},
+		"relay":              {"relay", "--spool", spool, "resource-attr", "k=v"},
+		"serve":              {"serve", "extra"},
+		"central":            {"central", "extra"},
+		"conformance":        {"conformance", "extra"},
+		"telemetry registry": {"telemetry", "registry", "extra"},
+	} {
+		var out, errb bytes.Buffer
+		code := Run(context.Background(), args, &out, &errb)
+		if code != ExitUsage {
+			t.Errorf("%s: exit %d, want %d (stderr %q)", name, code, ExitUsage, errb.String())
+		}
+		if !strings.Contains(errb.String(), "takes no arguments") || !strings.Contains(errb.String(), `"extra"`) && name != "relay" {
+			t.Errorf("%s: stderr %q does not name the argument", name, errb.String())
+		}
+		if name == "relay" && !strings.Contains(errb.String(), `"resource-attr"`) {
+			t.Errorf("relay: stderr %q does not name resource-attr", errb.String())
+		}
+		if out.Len() != 0 {
+			t.Errorf("%s: printed %q", name, out.String())
 		}
 	}
 }

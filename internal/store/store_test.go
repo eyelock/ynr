@@ -227,6 +227,14 @@ func TestRegistryKeys(t *testing.T) {
 	if err != nil || r != (Registry{Collector: "gha-eyelock", Tool: "ynh", Version: "1.2.3-rc.5", SHA256: sum}) {
 		t.Fatalf("%+v %v", r, err)
 	}
+	// Build metadata is left out of the key, and a key with it is not accepted.
+	meta := RegistryKey("gha-eyelock", "ynf", "0.3.0+1d16688", sum)
+	if meta != "registries/gha-eyelock/ynf/0.3.0/"+sum+".json" || !ValidKey(meta) {
+		t.Errorf("build metadata key %q", meta)
+	}
+	if _, err := ParseRegistry("registries/gha-eyelock/ynf/0.3.0+1d16688/" + sum + ".json"); err == nil {
+		t.Error("a key with build metadata parsed")
+	}
 	for _, bad := range []string{
 		"registries/a/ynh/1/" + sum + ".json/x", "registries/a/ynh/../" + sum + ".json", "registries/a/ynh/1/short.json",
 		"registries/A/ynh/1/" + sum + ".json", "registries/a/ynh/1/" + sum + ".txt", "traces/a/ynh/1/" + sum + ".json",

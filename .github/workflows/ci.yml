@@ -1,17 +1,18 @@
 name: ci
 on:
   pull_request:
-  # The merge queue tests each pull request together with those ahead of it, on a gh-readonly-queue
-  # branch, and waits for the ruleset's required check (All Clear) to report there.
-  merge_group:
   push:
     branches: [main, develop]
 permissions:
   contents: read
 concurrency:
-  group: ci-${{ github.ref }}
-  # Only a superseded pull request run is cancelled. A push to main or develop, and a merge queue
-  # run, always finishes: cancelling it by the next merge hid a red develop until too late.
+  # A push to main or develop gets a group of its own, keyed on the commit, so no push run is
+  # replaced: GitHub keeps one waiting run per group, and a shared group let a third quick merge
+  # replace the second's run before it started, hiding a red develop. A pull request run keeps
+  # the ref's group, and a newer pull-request run cancels the older one.
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name == 'push' && github.sha || 'pr' }}
+  # A run that has started on develop or main always finishes: cancelling it by the next merge hid
+  # a red develop until too late.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   check:

@@ -69,6 +69,27 @@ type Config struct {
 	// passed, never content (ADR-006 rule 10). The caller checks the keys against a sibling's
 	// registry (registry.Declared); the relay stamps what it is given.
 	ResourceAttrs map[string]string
+	// KeyFile names the file holding the HMAC key for account ids (ADR-006 rule 10): 32 raw bytes
+	// or 64 hex characters, mode 0600, outside the spool. With it the relay replaces user.id,
+	// user.account_uuid, user.account_id and organization.id by "<key id>:<hex HMAC-SHA-256>";
+	// without it, it drops them. The key is never written, logged or printed.
+	KeyFile string
+	// SpoolRoot, when set, is also refused as a home for KeyFile, beside Dir.
+	SpoolRoot string
+}
+
+// Standing reports whether a relay listening on listen is a standing relay: any fixed port. Port 0
+// picks a free one, which makes a per-launch relay.
+func Standing(listen string) bool {
+	_, port, _ := net.SplitHostPort(listen)
+	return port != "0"
+}
+
+// ErrStandingResourceAttr is the refusal of resource attributes on a standing relay: it serves
+// many launches and cannot know which one a record belongs to, so only a per-launch relay may
+// stamp (ADR-004).
+func ErrStandingResourceAttr(listen string) error {
+	return fmt.Errorf("relay: resource attributes are for a per-launch relay (--listen port 0): a standing relay on %s serves many launches and cannot know which one a record belongs to (ADR-004)", listen)
 }
 
 // Stats counts what the relay did with the requests it received.
@@ -79,7 +100,10 @@ type Stats struct {
 	Limited   int64 // refused: over the rate limit
 	Malformed int64 // refused: not decodable OTLP, or an unknown path or content type
 	Stripped  int64 // attributes dropped before the spool: Stripped names, and paths under home
-	Spool     spoolexporter.Stats
+	// Unknown counts, by name, the attributes on Claude Code's records whose names are not on
+	// ClaudeCodeAttributes (the list for ClaudeCodePin). Names only, never values.
+	Unknown map[string]int64
+	Spool   spoolexporter.Stats
 }
 
 // Relay is a running relay.
@@ -91,6 +115,7 @@ type Relay struct {
 	limiter  *rate.Limiter
 	scrub    *scrubber
 	lock     *spool.Lock // held by a standing relay; nil on port 0
+	started  time.Time
 	inflight atomic.Int64
 	active   atomic.Int64 // requests being handled now
 
@@ -132,6 +157,10 @@ func New(cfg Config) (*Relay, error) {
 	if err := loopback(cfg.Listen); err != nil {
 		return nil, err
 	}
+	if len(cfg.ResourceAttrs) > 0 && Standing(cfg.Listen) {
+		return nil, ErrStandingResourceAttr(cfg.Listen)
+	}
+	valueCheck := newScrubber(cfg.Home)
 	for k, v := range cfg.ResourceAttrs {
 		if k == "" || v == "" {
 			return nil, fmt.Errorf("relay: resource attribute %q=%q: key and value must not be empty", k, v)
@@ -139,6 +168,19 @@ func New(cfg Config) (*Relay, error) {
 		if slices.Contains(Stripped, k) {
 			return nil, fmt.Errorf("relay: resource attribute %q is on the strip list (it names a person or the machine) and cannot be stamped", k)
 		}
+		// The stamp is applied after the strip, so a value the strip rules would drop must not be
+		// stamped: an email address or a path under the home folder.
+		if valueCheck.underHome(v) || email.MatchString(v) {
+			return nil, fmt.Errorf("relay: resource attribute %q: the value is an email address or a path under the home folder, which the relay strips from every record and so cannot stamp", k)
+		}
+	}
+	var hash *hasher
+	if cfg.KeyFile != "" {
+		key, err := readKeyFile(cfg.KeyFile, cfg.Dir, cfg.SpoolRoot)
+		if err != nil {
+			return nil, err
+		}
+		hash = newHasher(key)
 	}
 	fi, err := os.Lstat(cfg.Dir)
 	if err != nil {
@@ -162,7 +204,7 @@ func New(cfg Config) (*Relay, error) {
 		return nil, fmt.Errorf("relay: listening: %w", err)
 	}
 	var lock *spool.Lock
-	if _, port, _ := net.SplitHostPort(cfg.Listen); port != "0" {
+	if Standing(cfg.Listen) {
 		lock, err = spool.AcquireRelay(cfg.Dir, spool.RelayInfo{
 			PID: os.Getpid(), Since: time.Now().UTC().Truncate(time.Second), Endpoint: "http://" + ln.Addr().String(),
 		})
@@ -186,7 +228,9 @@ func New(cfg Config) (*Relay, error) {
 		lock:    lock,
 		limiter: rate.NewLimiter(rate.Limit(cfg.Rate), cfg.Burst),
 		scrub:   newScrubber(cfg.Home),
+		started: time.Now().UTC().Truncate(time.Second),
 	}
+	r.scrub.hash = hash
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/traces", r.handle(r.decodeTraces))
 	mux.HandleFunc("/v1/metrics", r.handle(r.decodeMetrics))
@@ -220,10 +264,12 @@ func (r *Relay) Endpoint() string { return "http://" + r.ln.Addr().String() }
 
 // Stats reports what the relay has done so far.
 func (r *Relay) Stats() Stats {
+	unknown, _ := r.scrub.unknown.snapshot(false)
 	return Stats{
 		Accepted: r.accepted.Load(), TooLarge: r.tooLarge.Load(), Busy: r.busy.Load(),
 		Limited: r.limited.Load(), Malformed: r.malformed.Load(), Stripped: r.stripped.Load(),
-		Spool: r.w.Stats(),
+		Unknown: unknown,
+		Spool:   r.w.Stats(),
 	}
 }
 
@@ -235,6 +281,26 @@ func (r *Relay) Serve(ctx context.Context) error {
 	}
 	errc := make(chan error, 1)
 	go func() { errc <- r.srv.Serve(r.ln) }()
+	if r.lock != nil {
+		// Only a standing relay is read by ynr doctor, so only it records the unknown names.
+		r.flushAttrs(true)
+		fctx, stopFlush := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			t := time.NewTicker(2 * time.Second)
+			defer t.Stop()
+			for {
+				select {
+				case <-fctx.Done():
+					return
+				case <-t.C:
+					r.flushAttrs(false)
+				}
+			}
+		}()
+		defer func() { stopFlush(); <-done; r.flushAttrs(false) }()
+	}
 	select {
 	case err := <-errc:
 		r.w.Close()
@@ -257,6 +323,19 @@ func (r *Relay) Serve(ctx context.Context) error {
 	}
 	r.w.Close()
 	return err
+}
+
+// flushAttrs writes the unknown-name record into the relay's folder when it changed, or always
+// with force (which starts a fresh record for this run). A write failure is not the relay's to
+// fail on: ynr doctor then simply has nothing to show.
+func (r *Relay) flushAttrs(force bool) {
+	counts, changed := r.scrub.unknown.snapshot(true)
+	if !changed && !force {
+		return
+	}
+	_ = spool.WriteRelayAttrs(r.cfg.Dir, spool.RelayAttrs{
+		Vendor: "claude-code", Version: ClaudeCodePin, Since: r.started, Unknown: counts,
+	})
 }
 
 // decoder turns an OTLP request body into scrubbed OTLP JSON and its record count.

@@ -66,3 +66,29 @@ func writeSpool(t *testing.T, root, rel, content string) {
 		t.Fatal(err)
 	}
 }
+
+func TestDoctorVendorAttrs(t *testing.T) {
+	root := t.TempDir()
+	if err := spool.Init(root); err != nil {
+		t.Fatal(err)
+	}
+	if c := checkVendorAttrs(root); c.Status != statusOK {
+		t.Errorf("no record: %+v", c)
+	}
+	local := filepath.Join(root, spool.LocalDir)
+	since := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	if err := spool.WriteRelayAttrs(local, spool.RelayAttrs{Vendor: "claude-code", Version: "2.1.326", Since: since, Unknown: map[string]int64{}}); err != nil {
+		t.Fatal(err)
+	}
+	if c := checkVendorAttrs(root); c.Status != statusOK {
+		t.Errorf("empty record: %+v", c)
+	}
+	if err := spool.WriteRelayAttrs(local, spool.RelayAttrs{Vendor: "claude-code", Version: "2.1.326", Since: since,
+		Unknown: map[string]int64{"zeta.new": 1, "alpha.new": 4}}); err != nil {
+		t.Fatal(err)
+	}
+	c := checkVendorAttrs(root)
+	if c.Status != statusWarn || !strings.Contains(c.Detail, "alpha.new, zeta.new") || !strings.Contains(c.Detail, "2.1.326") || !strings.Contains(c.Detail, "5 received") {
+		t.Errorf("unknown names: %+v", c)
+	}
+}

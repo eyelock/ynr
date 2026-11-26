@@ -57,9 +57,9 @@ where the tag is cut. `main` takes pull requests only from `develop`, `release/*
    ```
 
 5. **Back-merge into `develop`** once the release works, with a pull request from `main` into
-   `develop`. Do not send it through the merge queue: `develop`'s queue squashes, which would drop
-   `main`'s history out of `develop`. A repository admin merges it around the queue, with
-   **Merge without waiting for requirements** and **Create a merge commit**.
+   `develop`. Merge it with **Create a merge commit**, not a squash, which would drop `main`'s history
+   out of `develop`. A repository admin merges it, with **Merge without waiting for requirements**
+   when the ruleset asks for a check it does not run.
 
 The version is the tag: `ynr version` prints it, and a build from anything but a clean tag says
 `<tag>-<commits>-g<sha>`, with `-dirty` if the tree has changes.

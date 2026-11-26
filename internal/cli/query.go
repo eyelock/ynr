@@ -154,7 +154,8 @@ func write(stdout, stderr io.Writer, format string, q *query.Query, p query.Para
 }
 
 func listQueries(w io.Writer) {
-	_, _ = fmt.Fprintln(w, "Named queries (ynr query <name> [argument] [--since 7d] [--until <time>] [--lane <id>] [--label key:value]... [--format text|json]):")
+	_, _ = fmt.Fprintln(w, "Named queries (ynr query <name> [argument] [--store <url>] [--since 7d] [--until <time>] [--lane <id>] [--label key:value]...")
+	_, _ = fmt.Fprintln(w, "  [--format text|json] [--socket <path>] [--spool <root>] [--erase <file>]):")
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	for _, n := range query.Names() {
 		q, _ := query.Lookup(n)

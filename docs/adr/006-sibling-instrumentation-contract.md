@@ -60,6 +60,8 @@ tool.
     absolute path under it, from traces,
     metrics and logs (resource, scope, span, span event and link, data point and exemplar, and log
     record attributes). They are dropped, not hashed, with one exception: account ids (below).
+    `ynr conformance` checks this: rule 10's scrub check sends a fixture of vendor records carrying
+    these keys through the relay and fails if any reaches the spool raw.
 
     - **Tool details only behind the strip list.** A vendor's tool-detail option (Claude Code's
       `OTEL_LOG_TOOL_DETAILS`) may be on only when its telemetry reaches the spool through
@@ -175,3 +177,19 @@ tool.
   (ynw-17g.27, from the design in ynw-17g.20).
 - 2026-11-09: `ynh.session.id` is the one named exception to rule 8: allowed on vendor metrics, one
   value per launch, dropped or rolled up by ynr before rollups (ynw-j4a7, option B; ynw-8w20).
+- 2026-11-23: rule 10 names `ynr conformance`'s scrub check as its check that the relay strips
+  (ynr #155).
+- 2026-11-23: ynr drops identifying attributes from a data point as it rolls up (ynr #162):
+  `session.id`, `ynh.session.id`, `user.id`, `user.account_uuid`, `user.account_id`,
+  `organization.id`, `gen_ai.conversation.id`, `event.timestamp`, `event.sequence`, and any name
+  ending `.id`, `_id` or `.uuid`, so none is a rollup dimension kept 13 months outside erasure.
+  Each session's cumulative total still counts in the day: series are kept apart by their full
+  attributes and the names are dropped only from the rollup's row. In the month it counts only as
+  far as the series can be told apart without an id: each daily row carries `series_start` (the
+  day the series started), the month keeps each series' last day and sums them, and two series
+  that share every kept attribute and start on the same day are counted as one, so the month can
+  undercount then. The names come from reading the pinned
+  Claude Code list (`internal/relay/claude-code-attributes.txt`, 2.1.326), which does not say
+  which signal carries a name; the list was not re-probed against a live Claude Code for this
+  change, so the item "check the attribute list against Claude Code's actual metrics" in
+  ynr #162 stays open. Rollups already written keep what they held until re-rolled.

@@ -51,7 +51,7 @@ Each process writes its own files in its writer folder, so there is no locking:
 ```
 
 `ynr relay` names its files `ynr-relay-<pid>-<seq>`. A standing relay (on a fixed port) also keeps
-`.ynr-relay.lock` in its folder, holding its pid, start time and endpoint; the reader skips it.
+`.ynr-relay.lock` in its folder, holding its pid, start time and endpoint, and `.ynr-relay-attrs.json`, naming the vendor attributes it received that are not on the pinned list, with counts and no values; the reader skips both.
 
 Each line is one OTLP export request in the OTLP/JSON encoding: an `ExportTraceServiceRequest`
 (`resourceSpans`), an `ExportMetricsServiceRequest` (`resourceMetrics`) or an
@@ -83,7 +83,7 @@ and counted, and an exporter never returns one.
 | Reads open files up to | their last complete line |
 | Longest line | `--max-line`, 4 MiB; a longer or malformed line is skipped and counted |
 | A run folder's budget | the manifest's `run_quota_bytes`, else 64 MiB; once that many bytes have been read from a run's folder (since `ynr serve` started), it reads no more of it, leaves its files where they are, counts it in `over_budget` in its log, and stamps `ynr.provenance.warning=over-budget` on the records of the file it was reading when it stopped; other folders are unaffected |
-| Whole spool cap | `--spool-cap`, 1 GiB; over it, the oldest closed files are evicted first and counted in `ynr.spool.evicted` |
+| Whole spool cap | `--spool-cap`, 1 GiB; over it, the oldest closed files are evicted first and logged as a warning (`ynr.spool.evicted`), not emitted as a metric |
 | Deletes a closed file | only when everything in it is committed to the store (or to the upstream, if there is no store) |
 | Poll | `--poll`, 1 second |
 

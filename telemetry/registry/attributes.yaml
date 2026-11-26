@@ -2,7 +2,7 @@ groups:
   - id: registry.ynr
     type: attribute_group
     stability: development
-    brief: Attributes ynr stamps on records, and on its own counters.
+    brief: Attributes ynr stamps on records.
     attributes:
       - id: ynr.provenance
         type:
@@ -52,8 +52,8 @@ groups:
         type: string
         stability: development
         brief: >
-          A name a record used that its tool's registry does not declare. Only on
-          ynr.registry.unknown_names, and capped.
+          A name a record used that its tool's registry does not declare, as named in the
+          ynr.registry.unknown_names warning log line; capped.
         examples: ["ynh.made.up"]
         annotations:
           ynr.cardinality: 1000

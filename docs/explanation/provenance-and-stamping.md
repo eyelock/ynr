@@ -68,15 +68,23 @@ the bucket, so the segment is its verified identity, and central stamps `ynr.col
 The job a record came from is data, `ynr.collector.instance`, not identity. ynr also stamps
 `ynr.received_at`, the time it received the record, replacing anything the sender set.
 
-Central's configuration lists which collectors may carry `factory` or `service` provenance. A record
-claiming either from any other collector, a laptop for instance, is marked unverified. The reader
-also accepts only keys of the exact shape, because an IAM policy cannot fix a key's depth.
+Central does not yet check which collectors may carry `factory` or `service` provenance, and it
+marks no record unverified: it reads `ynr.collector.id` as the collector wrote it, so a record
+claiming either from any other collector, a laptop for instance, shows as genuine. The trust list
+was decided against, so central trusts what its bucket holds (see the addendum to
+[ADR-003](../adr/003-control-and-observation-planes.md)). The reader also accepts only keys of the
+exact shape, because an IAM policy cannot fix a key's depth.
 
 ## People appear by their handle
 
 Records name people by their handle in the system where they acted, qualified by its host, such as
 `github.com/octocat`, in the standard `user.name` attribute, never by name or email. Handles are still
 personal data. Retention bounds them, the central dashboard requires sign-in, and an erasure list
-masks a handle in every query and removes it from the store at the next compaction.
+masks a handle in every query and removes it from the store: at the next compaction for hours inside
+the compaction lookback, and, when the list is new or has changed, in one sweep of every older hour
+inside the retention: on `ynr serve`, its `--retain` (7 days by default); on `ynr central`, `--erase-reach`
+(30 days by default), or `--retain` for a folder store when that is longer. Erasure matches the handle only where it is a `user.name` attribute (on the
+resource or the record) or a record's `actor`; it does not match hashed or raw account ids, display
+names or email addresses, or a handle in any other attribute.
 
 See [ADR-002](../adr/002-telemetry-model.md) and [ADR-003](../adr/003-control-and-observation-planes.md).

@@ -47,6 +47,13 @@ type Settings struct {
 	RegistryTools []string
 	// Upstream is an OTLP/HTTP endpoint, such as http://localhost:4318.
 	Upstream string
+	// UpstreamHeaders are sent on every upstream export, such as an API key. See ParseHeaders.
+	UpstreamHeaders map[string]string
+	// UpstreamCompression is "gzip" or "none"; empty leaves the exporter's default (gzip).
+	UpstreamCompression string
+	// UpstreamCA, UpstreamCert and UpstreamKey are PEM file paths: the CA that signs the upstream's
+	// certificate, and the client certificate and key to present to it. Empty uses the system roots.
+	UpstreamCA, UpstreamCert, UpstreamKey string
 	// Debug also prints a summary of everything shipped to stderr, and the Collector's info logs.
 	Debug bool
 }
@@ -68,6 +75,9 @@ func Factories() (otelcol.Factories, error) {
 	}, nil
 }
 
+// upstreamQueueSize bounds the in-memory queue of the best-effort upstream copy when a store is set.
+const upstreamQueueSize = 1000
+
 // Config builds the Collector's configuration. It is JSON, which is also YAML.
 func Config(s Settings) (string, error) {
 	if s.Upstream == "" && s.Store == "" {
@@ -84,13 +94,35 @@ func Config(s Settings) (string, error) {
 			// A best-effort copy: a short retry, so a slow upstream delays shipping little.
 			retry = map[string]any{"enabled": true, "initial_interval": "1s", "max_interval": "2s", "max_elapsed_time": "5s"}
 		}
-		exp["otlp_http"] = map[string]any{
-			"endpoint": s.Upstream,
-			// Synchronous: without a store, a line is committed only once the upstream has
-			// accepted it (ADR-004).
-			"sending_queue":    map[string]any{"enabled": false},
+		// Synchronous: without a store, a line is committed only once the upstream has
+		// accepted it (ADR-004).
+		queue := map[string]any{"enabled": false}
+		if s.Store != "" {
+			// A best-effort copy never holds the spool back (ADR-004): the line is queued and
+			// retried off the reader's path, and a full queue drops the copy rather than blocking.
+			queue = map[string]any{"enabled": true, "num_consumers": 1, "queue_size": upstreamQueueSize, "block_on_overflow": false}
+		}
+		up := map[string]any{
+			"endpoint":         s.Upstream,
+			"sending_queue":    queue,
 			"retry_on_failure": retry,
 		}
+		if len(s.UpstreamHeaders) > 0 {
+			up["headers"] = s.UpstreamHeaders
+		}
+		if s.UpstreamCompression != "" {
+			up["compression"] = s.UpstreamCompression
+		}
+		tls := map[string]any{}
+		for k, v := range map[string]string{"ca_file": s.UpstreamCA, "cert_file": s.UpstreamCert, "key_file": s.UpstreamKey} {
+			if v != "" {
+				tls[k] = v
+			}
+		}
+		if len(tls) > 0 {
+			up["tls"] = tls
+		}
+		exp["otlp_http"] = up
 	}
 	if s.Debug {
 		exporters = append(exporters, "debug")

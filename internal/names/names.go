@@ -16,18 +16,8 @@ const (
 	AttrReceivedAt = "ynr.received_at"
 	// Set only when ynr has no learned registry for the record's service.name and service.version (ADR-007); the record is kept.
 	AttrRegistry = "ynr.registry"
-	// A name a record used that its tool's registry does not declare. Only on ynr.registry.unknown_names, and capped.
-	AttrRegistryName   = "ynr.registry.name"
-	AttrServiceName    = "service.name"
-	AttrServiceVersion = "service.version"
-)
-
-// Metric names.
-const (
-	// Closed spool files deleted unshipped because the spool reached its cap (ADR-004).
-	MetricSpoolEvicted = "ynr.spool.evicted"
-	// Names records used that their tool's learned registry does not declare, by service, version and name. Counted, never rejected; the distinct names are capped (ADR-007).
-	MetricRegistryUnknownNames = "ynr.registry.unknown_names"
+	// A name a record used that its tool's registry does not declare, as named in the ynr.registry.unknown_names warning log line; capped.
+	AttrRegistryName = "ynr.registry.name"
 )
 
 // Values of ynr.provenance.

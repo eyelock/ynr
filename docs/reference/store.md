@@ -100,9 +100,22 @@ A Parquet file for each day with a row for each item and step in each hour: `ite
 
 ### Rollups
 
-Daily and monthly aggregates of every metric by its attributes, and of every run (`ynh.run`) by lane,
-model, outcome, harness and repository, with run counts, cost and token totals. A day is rolled up by
-the hours it was received in, so a record is counted on one day.
+Daily and monthly aggregates of every metric by its attributes, less the identifying ones below, and
+of every run (`ynh.run`) by lane, model, outcome, harness and repository, with run counts, cost and
+token totals. A day is rolled up by the hours it was received in, so a record is counted on one day.
+
+Rollups are kept 13 months, outside erasure, so identifying attributes on a data point are dropped
+from the rollup rows: `session.id`, `ynh.session.id`, `user.id`, `user.account_uuid`,
+`user.account_id`, `organization.id`, `gen_ai.conversation.id`, `event.timestamp`, `event.sequence`,
+and any name ending `.id`, `_id` or `.uuid`. The list is read from the pinned Claude Code attribute
+list, not re-probed against a live Claude Code
+([ADR-006](../adr/006-sibling-instrumentation-contract.md) has the history). Rollups written before
+this change keep what they held until their day is rolled up again.
+
+A daily metric row carries a `series_start` column: the day its series started. The monthly rollup
+keeps each series' last day and sums them, telling series apart by their kept attributes and
+`series_start`. Two series that share every kept attribute and start on the same day are counted as
+one, so the month can undercount then. Day granularity is accepted, and the undercount is rare.
 
 ### Leases
 
@@ -113,7 +126,8 @@ expired lease may be taken over; a live one means another central is compacting 
 
 A tool's `telemetry registry --format json`, written by `ynr serve` for each tool named in
 `--registry-tools`, at the key its tool, version and content hash give. Two different registries for
-the same tool and version sit side by side.
+the same tool and version sit side by side. A version's SemVer build metadata (the `+...` suffix, such as `0.3.0+1d16688` from a locally built tool) is
+left out of the key, since SemVer ignores it when comparing versions; the registry object keeps the full version.
 
 ## What a reader accepts
 

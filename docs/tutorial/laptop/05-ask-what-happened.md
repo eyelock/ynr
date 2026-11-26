@@ -13,7 +13,8 @@ ynr query
 Expected:
 
 ```text
-Named queries (ynr query <name> [argument] [--since 7d] [--until <time>] [--lane <id>] [--label key:value]... [--format text|json]):
+Named queries (ynr query <name> [argument] [--store <url>] [--since 7d] [--until <time>] [--lane <id>] [--label key:value]...
+  [--format text|json] [--socket <path>] [--spool <root>] [--erase <file>]):
   cost              what runs cost and the tokens they used, by model, as the runners reported it (default --since 7d)
   item <item key>   what happened to one work item, by its key: its steps, runs and events in order (default --since 7d)
   items             the work items seen lately, most recent first, with their last outcome (default --since 7d)

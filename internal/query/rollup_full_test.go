@@ -4,6 +4,7 @@ package query
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,18 @@ import (
 
 func metricLine(t *testing.T, name string, temporality pmetric.AggregationTemporality, value float64, at time.Time) []byte {
 	t.Helper()
+	return metricLineWith(t, name, temporality, value, at, nil)
+}
+
+// metricLineWith is metricLine with more data-point attributes.
+func metricLineWith(t *testing.T, name string, temporality pmetric.AggregationTemporality, value float64, at time.Time, extra map[string]string) []byte {
+	t.Helper()
+	return metricLineStarting(t, name, temporality, value, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), at, extra)
+}
+
+// metricLineStarting is metricLineWith for a series that started at start.
+func metricLineStarting(t *testing.T, name string, temporality pmetric.AggregationTemporality, value float64, start, at time.Time, extra map[string]string) []byte {
+	t.Helper()
 	md := pmetric.NewMetrics()
 	rm := md.ResourceMetrics().AppendEmpty()
 	rm.Resource().Attributes().PutStr("service.name", "ynf")
@@ -25,9 +38,12 @@ func metricLine(t *testing.T, name string, temporality pmetric.AggregationTempor
 	sum.SetAggregationTemporality(temporality)
 	dp := sum.DataPoints().AppendEmpty()
 	dp.SetDoubleValue(value)
-	dp.SetStartTimestamp(pcommon.NewTimestampFromTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)))
+	dp.SetStartTimestamp(pcommon.NewTimestampFromTime(start))
 	dp.SetTimestamp(pcommon.NewTimestampFromTime(at))
 	dp.Attributes().PutStr("gen_ai.response.model", "claude-opus-5-5")
+	for k, v := range extra {
+		dp.Attributes().PutStr(k, v)
+	}
 	b, err := (&pmetric.JSONMarshaler{}).MarshalMetrics(md)
 	if err != nil {
 		t.Fatal(err)
@@ -152,5 +168,84 @@ func TestLongWindowSeesTheOpenDay(t *testing.T) {
 	res = run(t, r, "runs", long)
 	if got := rows(res); len(got) != 1 || !strings.Contains(got[0], " 4 <nil> 15.5") {
 		t.Fatalf("runs = %v", got)
+	}
+}
+
+// TestIdsOnDataPointsAreNotRollupDimensions: a session, account or request id on a data point
+// does not become a rollup dimension, daily or monthly, while each session's cumulative total
+// still counts.
+func TestIdsOnDataPointsAreNotRollupDimensions(t *testing.T) {
+	r := openStore(t)
+	ctx := context.Background()
+	d := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
+	cum := pmetric.AggregationTemporalityCumulative
+	ship(t, r, store.Metrics, d.Add(5*time.Minute), "local.a",
+		metricLineWith(t, "claude_code.cost.usage", cum, 5, d, map[string]string{"session.id": "s-1", "user.account_uuid": "u-1", "request_id": "r-1", "model": "opus"}),
+		metricLineWith(t, "claude_code.cost.usage", cum, 7, d, map[string]string{"session.id": "s-2", "user.account_uuid": "u-2", "request_id": "r-2", "model": "opus"}))
+	c := Compaction{Grace: 10 * time.Minute, Keep: time.Hour, Lookback: 100 * 24 * time.Hour}
+	if _, err := Compact(ctx, r, c, now); err != nil {
+		t.Fatal(err)
+	}
+	for _, period := range []string{store.Daily, store.Monthly} {
+		p, err := localFile(ctx, r, store.RollupKey(store.RollupMetrics, period, d))
+		if err != nil {
+			t.Fatalf("%s rollup: %v", period, err)
+		}
+		db, err := sql.Open("duckdb", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var keys string
+		var total float64
+		err = db.QueryRowContext(ctx, `SELECT (SELECT sum(total) FROM `+parquet([]string{p})+`),
+  (SELECT string_agg(DISTINCT a.k, ',' ORDER BY a.k) FROM (SELECT unnest(attributes) AS a FROM `+parquet([]string{p})+`))`).Scan(&total, &keys)
+		_ = db.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if keys != "gen_ai.response.model,model" || total != 12 {
+			t.Errorf("%s rollup: attribute keys %q, total %v, want only the dimensions and 12", period, keys, total)
+		}
+	}
+}
+
+// TestMonthlyCumulativeTotalSumsSessionsOnDifferentDays: two sessions on two days of one month
+// give a monthly cumulative total that is their sum, with no id kept as a dimension, and a
+// session that reports on both days counts once, at its last value: s-1 (5, then 9) and s-2
+// (3) on the first day, s-3 (7) on the second; the month is 9 + 3 + 7, not the last day's 16.
+func TestMonthlyCumulativeTotalSumsSessionsOnDifferentDays(t *testing.T) {
+	r := openStore(t)
+	ctx := context.Background()
+	d1 := time.Date(2026, 8, 10, 9, 0, 0, 0, time.UTC)
+	d2 := d1.AddDate(0, 0, 1)
+	cum := pmetric.AggregationTemporalityCumulative
+	ship(t, r, store.Metrics, d1.Add(5*time.Minute), "local.a",
+		metricLineStarting(t, "claude_code.cost.usage", cum, 5, d1, d1, map[string]string{"session.id": "s-1", "model": "opus"}),
+		metricLineStarting(t, "claude_code.cost.usage", cum, 3, d1.AddDate(0, 0, -1), d1, map[string]string{"session.id": "s-2", "model": "opus"}))
+	ship(t, r, store.Metrics, d2.Add(5*time.Minute), "local.b",
+		metricLineStarting(t, "claude_code.cost.usage", cum, 7, d2, d2, map[string]string{"session.id": "s-3", "model": "opus"}),
+		metricLineStarting(t, "claude_code.cost.usage", cum, 9, d1, d2, map[string]string{"session.id": "s-1", "model": "opus"}))
+	c := Compaction{Grace: 10 * time.Minute, Keep: time.Hour, Lookback: 100 * 24 * time.Hour}
+	if _, err := Compact(ctx, r, c, now); err != nil {
+		t.Fatal(err)
+	}
+	p, err := localFile(ctx, r, store.RollupKey(store.RollupMetrics, store.Monthly, d1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("duckdb", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	var total float64
+	var keys string
+	err = db.QueryRowContext(ctx, `SELECT (SELECT sum(total) FROM `+parquet([]string{p})+`),
+  (SELECT coalesce(string_agg(DISTINCT a.k, ',' ORDER BY a.k), '') FROM (SELECT unnest(attributes) AS a FROM `+parquet([]string{p})+`))`).Scan(&total, &keys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 19 || keys != "gen_ai.response.model,model" {
+		t.Errorf("monthly total %v, keys %q: want 19 (9 + 3 + 7) and no ids", total, keys)
 	}
 }

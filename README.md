@@ -56,8 +56,9 @@ Other tools write the spool with one of two packages, each depending only on its
 OpenTelemetry SDK and on nothing else in ynr. ynr's tests read what both write.
 
 - **Go:** [`spoolexporter/`](spoolexporter), the module `github.com/eyelock/ynr/spoolexporter`,
-  released with tags `spoolexporter/vX.Y.Z`. It can also send the same OTLP/JSON to an
-  operator's `OTEL_EXPORTER_OTLP_*` endpoint over OTLP/HTTP (`net/http` only, no gRPC or protobuf).
+  released with tags `spoolexporter/vX.Y.Z`. It can also send to an operator's
+  `OTEL_EXPORTER_OTLP_*` endpoint over OTLP/HTTP, as OTLP/JSON or OTLP/protobuf as the
+  `OTEL_EXPORTER_OTLP_PROTOCOL` setting chooses (`net/http` and a small `protowire` encoder; no gRPC).
 - **npm:** [`spoolexporter/js/`](spoolexporter/js), the package `@eyelock/otel-spool-exporter`,
   published to GitHub Packages by the same tags. Installing it needs an `.npmrc` with
   `@eyelock:registry=https://npm.pkg.github.com` and a token that can read packages. It writes

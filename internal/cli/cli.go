@@ -43,19 +43,19 @@ Usage:
   ynr version
   ynr info [--spool <root>] [--format text|json]
   ynr doctor [--spool <root>] [--store <url>] [--format text|json]
-  ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>]
+  ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>] [--upstream-header name=value]
             [--collector-id <id>] [--collector-instance <id>] [--poll 1s]
             [--max-line <bytes>] [--spool-cap <bytes>] [--hot-window 168h] [--retain 168h] [--retain-bytes <bytes>]
             [--erase <file>] [--ui 127.0.0.1:4319] [--registry-tools ynh,ynf,ynm] [--debug]
   ynr central --store <url> [--hot-window 6h] [--socket <path>] [--state <folder>] [--poll 5s]
-            [--compact-lookback 24h] [--compact-every 5m] [--erase <file>]
+            [--compact-lookback 24h] [--compact-every 5m] [--erase <file>] [--erase-reach 720h]
             [--retain 168h] [--retain-bytes <bytes>]
             [--ui <addr> --oidc-issuer <url> --oidc-client-id <id> --oidc-redirect-url <url>
              --allow-emails <list> | --allow-domain <domain> | --allow-group <group>
              [--group-claim groups] [--session-ttl 8h]]
   ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
             [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
-            [--resource-attr key=value]... [--registry-tools ynh] [--exit-on-stdin-eof]
+            [--resource-attr key=value]... [--registry-tools ynh] [--key-file <path>] [--exit-on-stdin-eof]
   ynr telemetry registry [--format text|json]
   ynr conformance [--file .ynr/conformance.yaml] [--format text|json] [--timeout 60s]
             [--flush-limit 2s] [--keep]
@@ -80,6 +80,12 @@ Wheelhouse's: it records itself in the folder for ynr info and ynr doctor, and r
 the folder with another standing relay. --resource-attr (repeatable) sets an attribute on the
 resource of every record the relay writes, over a vendor's value; its key must be one a
 --registry-tools registry declares (default ynh), such as ynh.session.id, or the relay refuses to start.
+--resource-attr is for a per-launch relay only: a standing relay (a fixed --listen port) refuses it,
+so use --listen port 0, the default. --key-file (or YNR_RELAY_KEY_FILE) names the
+file holding the key that HMAC-hashes account ids (user.id, user.account_uuid, user.account_id,
+organization.id); with none, the relay drops them.
+A value the relay would strip from every record (an email address, or the home folder or a path
+under it) is refused too, since the stamp comes after the strip.
 
 ynr conformance runs the scenarios in a tool's conformance file against a temporary spool and a
 local test endpoint, and checks the instrumentation contract (ADR-006, ADR-008). It exits 1 if any
@@ -127,6 +133,10 @@ func Run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "version", "--version":
+		if len(args) > 1 {
+			_, _ = fmt.Fprintf(stderr, "ynr: version takes no arguments, got %q\n", args[1])
+			return ExitUsage
+		}
 		_, _ = fmt.Fprintf(stdout, "%s (%s)\n", ynr.Version, ynr.Build)
 		return ExitOK
 	case "info":
@@ -160,6 +170,17 @@ func flags(name string, stderr io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet("ynr "+name, flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	return fs
+}
+
+// noArgs refuses a positional argument the command does not take, naming it, so a mistyped flag
+// (`resource-attr` for `--resource-attr`) never starts the command without its effect. It reports
+// whether the command may go on.
+func noArgs(fs *flag.FlagSet, stderr io.Writer) bool {
+	if fs.NArg() == 0 {
+		return true
+	}
+	_, _ = fmt.Fprintf(stderr, "ynr: %s takes no arguments, got %q\n", strings.TrimPrefix(fs.Name(), "ynr "), fs.Arg(0))
+	return false
 }
 
 // env returns the environment fallback for a flag.
@@ -220,6 +241,9 @@ func info(args []string, stdout, stderr io.Writer) int {
 	root := fs.String("spool", defaultRoot(), "spool root")
 	format := fs.String("format", "text", "text or json")
 	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+	if !noArgs(fs, stderr) {
 		return ExitUsage
 	}
 	rep := infoReport{Version: ynr.Version, Build: ynr.Build, Capabilities: ynr.Capabilities, Spool: *root}
@@ -288,6 +312,8 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	instance := fs.String("collector-instance", env("YNR_COLLECTOR_INSTANCE", ""), "the job within the pool, recorded as data (YNR_COLLECTOR_INSTANCE)")
 	storeURL := fs.String("store", envOr("YNR_STORE", defaultStore()), "object store to ship batches to, such as file:///path; empty for none (YNR_STORE)")
 	upstream := fs.String("upstream", env("YNR_UPSTREAM", ""), "OTLP/HTTP endpoint to also forward to, such as http://localhost:4318 (YNR_UPSTREAM)")
+	var upHeaders headerFlag
+	fs.Var(&upHeaders, "upstream-header", "a header to send on every upstream export, name=value; repeatable; adds to OTEL_EXPORTER_OTLP_HEADERS")
 	poll := fs.Duration("poll", time.Second, "how often to read the spool")
 	maxLine := fs.Int("max-line", spool.DefaultMaxLine, "longest line accepted, in bytes")
 	debug := fs.Bool("debug", false, "also print a summary of what is shipped")
@@ -299,6 +325,9 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 	ui := fs.String("ui", env("YNR_UI", ""), "serve the local dashboard on this loopback address, such as 127.0.0.1:4319 (full build only) (YNR_UI)")
 	registryTools := fs.String("registry-tools", env("YNR_REGISTRY_TOOLS", ""), "tools whose telemetry registries to learn at startup, by bare name on the PATH, comma separated, such as ynh,ynf,ynm (YNR_REGISTRY_TOOLS)")
 	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+	if !noArgs(fs, stderr) {
 		return ExitUsage
 	}
 	if *ui != "" && ynr.Build != "full" {
@@ -369,11 +398,11 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		}
 		_, _ = fmt.Fprintf(stderr, "ynr: dashboard at http://%s/\n", uiLn.Addr())
 	}
-	stopHot := startHot(ctx, *root, *storeURL, *hotWindow, *poll, uiLn, stderr)
+	stopHot := startHot(ctx, *root, *storeURL, *hotWindow, *retain, *poll, uiLn, stderr)
 	defer stopHot()
 	stopRetain := startRetention(ctx, *storeURL, store.Retention{Records: *retain, Rollups: store.LaptopRetention.Rollups, MaxBytes: *retainBytes}, stderr)
 	defer stopRetain()
-	err = collector.Run(ctx, collector.Settings{
+	settings := collector.Settings{
 		SpoolRoot:     *root,
 		PollInterval:  *poll,
 		MaxLine:       *maxLine,
@@ -383,7 +412,15 @@ func serve(ctx context.Context, args []string, stderr io.Writer) int {
 		RegistryTools: splitList(*registryTools),
 		Upstream:      *upstream,
 		Debug:         *debug,
-	})
+	}
+	if *upstream != "" {
+		settings.UpstreamHeaders = upHeaders.m
+		if err := collector.UpstreamFromEnv(&settings, os.Getenv); err != nil {
+			_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
+			return ExitConfig
+		}
+	}
+	err = collector.Run(ctx, settings)
 	if err != nil && ctx.Err() == nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
 		return ExitAdapter
@@ -406,10 +443,14 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	maxMemory := fs.Int64("max-memory", relay.DefaultMaxMemory, "most bytes of requests held at once")
 	perSecond := fs.Float64("rate", relay.DefaultRate, "requests accepted a second, sustained")
 	var attrs resourceAttrs
-	fs.Var(&attrs, "resource-attr", "key=value set on the resource of every record the relay writes, overriding the vendor's; the key must be declared by a --registry-tools registry; repeatable")
+	fs.Var(&attrs, "resource-attr", "key=value set on the resource of every record the relay writes, overriding the vendor's; the key must be declared by a --registry-tools registry; the value must not be an email address, or the home folder or a path under it (the relay strips those); refused on a standing relay (a fixed --listen port), so only with --listen port 0; repeatable")
 	relayTools := fs.String("registry-tools", env("YNR_REGISTRY_TOOLS", "ynh"), "tools whose telemetry registries declare the --resource-attr keys, by bare name on the PATH, comma separated (YNR_REGISTRY_TOOLS)")
+	keyFile := fs.String("key-file", os.Getenv("YNR_RELAY_KEY_FILE"), "file holding the key that hashes account ids: 32 bytes, raw or hex, mode 0600, outside the spool; without one the ids are dropped (YNR_RELAY_KEY_FILE)")
 	stdinEOF := fs.Bool("exit-on-stdin-eof", false, "also stop when standard input closes, so the relay ends with the process that started it")
 	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+	if !noArgs(fs, stderr) {
 		return ExitUsage
 	}
 	switch {
@@ -421,6 +462,10 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		return ExitUsage
 	case *maxRequest <= 0 || *maxMemory <= 0 || *perSecond <= 0:
 		_, _ = fmt.Fprintln(stderr, "ynr: --max-request, --max-memory and --rate must be positive")
+		return ExitConfig
+	}
+	if len(attrs) > 0 && relay.Standing(*listen) {
+		_, _ = fmt.Fprintf(stderr, "ynr: --resource-attr: %v\n", relay.ErrStandingResourceAttr(*listen))
 		return ExitConfig
 	}
 	if len(attrs) > 0 {
@@ -438,7 +483,7 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	}
 	r, err := relay.New(relay.Config{
 		Dir: *dir, Listen: *listen, MaxRequest: *maxRequest, MaxMemory: *maxMemory, Rate: *perSecond,
-		ResourceAttrs: attrs,
+		ResourceAttrs: attrs, KeyFile: *keyFile, SpoolRoot: defaultRoot(),
 	})
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
@@ -466,6 +511,10 @@ func relayCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	s := r.Stats()
 	_, _ = fmt.Fprintf(stderr, "ynr relay: %d accepted; refused %d too large, %d busy, %d rate limited, %d malformed; %d attributes stripped; %d records dropped by the spool\n",
 		s.Accepted, s.TooLarge, s.Busy, s.Limited, s.Malformed, s.Stripped, s.Spool.Dropped)
+	if len(s.Unknown) > 0 {
+		_, _ = fmt.Fprintf(stderr, "ynr relay: %d Claude Code attribute names not on the %s list: %s\n",
+			len(s.Unknown), relay.ClaudeCodePin, strings.Join(relay.UnknownNames(s.Unknown), ", "))
+	}
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "ynr: %v\n", err)
 		return ExitAdapter
@@ -502,4 +551,23 @@ func splitList(s string) []string {
 		}
 	}
 	return out
+}
+
+// headerFlag collects each --upstream-header name=value.
+type headerFlag struct{ m map[string]string }
+
+func (h *headerFlag) String() string { return "" }
+
+func (h *headerFlag) Set(v string) error {
+	m, err := collector.ParseHeaders(v)
+	if err != nil || len(m) != 1 {
+		return fmt.Errorf("want one name=value, got %q", v)
+	}
+	if h.m == nil {
+		h.m = map[string]string{}
+	}
+	for k, val := range m {
+		h.m[k] = val
+	}
+	return nil
 }

@@ -60,13 +60,13 @@ ynr doctor [--spool <root>] [--store <url>] [--format text|json]
 | `--store` | `file://$XDG_DATA_HOME/ynr/store`, or `file://~/.local/share/ynr/store` | The store `ynr serve` ships to. `YNR_STORE`. |
 | `--format` | `text` | `text` or `json`: `version`, `build` and `checks`, each with `name`, `status` and `detail`. |
 
-Checks, in order: `otlp`, `path`, `spool`, `serve`, `relay`, `backlog`, `store`, `queries`. Each is
+Checks, in order: `otlp`, `path`, `spool`, `serve`, `relay`, `vendor`, `backlog`, `store`, `queries`. Each is
 `ok`, `warn` or `fail`. Exit 1 if any is not `ok`.
 
 ### ynr serve
 
 ```
-ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>]
+ynr serve [--spool <root>] [--store <url>] [--upstream <otlp-http-endpoint>] [--upstream-header name=value]
           [--collector-id <id>] [--collector-instance <id>] [--poll 1s]
           [--max-line <bytes>] [--spool-cap <bytes>] [--hot-window 168h] [--retain 168h]
           [--retain-bytes <bytes>] [--erase <file>] [--ui 127.0.0.1:4319]
@@ -80,6 +80,7 @@ Runs in the foreground until Ctrl-C or `SIGTERM`.
 | `--spool` | the spool root | The spool root. `YNR_SPOOL_ROOT`. |
 | `--store` | the laptop folder store | The object store to ship batches to, such as `file:///path` or `s3://bucket?region=...`. An empty value ships only to the upstream. `YNR_STORE`. |
 | `--upstream` | none | An OTLP/HTTP endpoint to also forward to, such as `http://localhost:4318`. With a store, the upstream is a best-effort copy; without one, it commits the spool. `YNR_UPSTREAM`. |
+| `--upstream-header` | none | A header to send on every upstream export, `name=value`, such as `x-honeycomb-team=KEY`. Repeatable. Added to `OTEL_EXPORTER_OTLP_HEADERS`, and wins over it for the same name. |
 | `--collector-id` | `local-<host>` | This collector's identity: a runner pool or a host. Matches `^[a-z0-9][a-z0-9._-]{0,62}$`. A hostname too long for that is shortened and ends in a hash of the whole name. `YNR_COLLECTOR_ID`. |
 | `--collector-instance` | none | The job within the pool, recorded as data. `YNR_COLLECTOR_INSTANCE`. |
 | `--poll` | `1s` | How often to read the spool. |
@@ -93,6 +94,12 @@ Runs in the foreground until Ctrl-C or `SIGTERM`.
 | `--registry-tools` | none | Tools whose telemetry registries to learn at startup, comma separated, each run by bare name on `PATH` as `<tool> telemetry registry --format json`. A tool that is missing or fails is logged and skipped. `YNR_REGISTRY_TOOLS`. |
 | `--debug` | off | Also prints a summary of what is shipped, and the embedded Collector's info-level log lines (`ynr: collector info: ...`), which are otherwise left out: only its warnings and errors show. |
 
+With `--upstream`, serve also reads these standard variables for the upstream exporter: `OTEL_EXPORTER_OTLP_HEADERS`
+(comma-separated `name=value`, values percent-encoded), `OTEL_EXPORTER_OTLP_COMPRESSION` (`gzip`, the default, or `none`),
+`OTEL_EXPORTER_OTLP_CERTIFICATE` (a PEM CA file for the upstream's certificate), and `OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE`
+and `OTEL_EXPORTER_OTLP_CLIENT_KEY` (PEM files for mutual TLS). The signal-specific variants (`..._TRACES_HEADERS` and the
+like) are not read. A malformed value stops serve with exit code 30.
+
 At least one of `--store` and `--upstream` is needed. In the full build `ynr serve` also keeps the
 hot tier, compacts, and answers `ynr query` on a
 Unix socket: `serve.sock` in the spool's `.ynr` folder, or under the temporary directory when that
@@ -102,7 +109,7 @@ path is too long for a socket. `ynr query` and `ynr doctor` derive the same path
 
 ```
 ynr central --store <url> [--hot-window 6h] [--socket <path>] [--state <folder>] [--poll 5s]
-            [--compact-lookback 24h] [--compact-every 5m] [--erase <file>]
+            [--compact-lookback 24h] [--compact-every 5m] [--erase <file>] [--erase-reach 720h]
             [--ui <addr> --oidc-issuer <url> --oidc-client-id <id> --oidc-redirect-url <url>
              --allow-emails <list> | --allow-domain <domain> | --allow-group <group>
              [--group-claim groups] [--session-ttl 8h]]
@@ -121,6 +128,7 @@ ynr central --store <url> [--hot-window 6h] [--socket <path>] [--state <folder>]
 | `--compact-lookback` | `24h` | How far back hours are compacted. |
 | `--compact-every` | `5m` | How often compaction runs. |
 | `--erase` | none | A file of handles to erase. `YNR_ERASE`. |
+| `--erase-reach` | `720h` | How far back the sweep reaches when the `--erase` list is new or changed, past `--compact-lookback`. Match the bucket's lifecycle expiry (30 days by default). With a folder store the sweep reaches at least `--retain` too, the longer of the two. `ynr serve` sweeps its `--retain` (7 days by default). |
 | `--ui` | off | Serves the dashboard behind sign-in on this address, such as `0.0.0.0:4320`. Refused unless sign-in is configured. `YNR_UI`. |
 | `--oidc-issuer` | none | The OpenID Connect issuer URL. `YNR_OIDC_ISSUER`. |
 | `--oidc-client-id` | none | The client id registered with the issuer. `YNR_OIDC_CLIENT_ID`. |
@@ -141,7 +149,7 @@ and `YNR_SESSION_SECRET`. See [Sign-in (OIDC)](sign-in.md).
 ```
 ynr relay --spool <writer folder> [--listen 127.0.0.1:0] [--format text|json]
           [--max-request <bytes>] [--max-memory <bytes>] [--rate <per second>]
-          [--resource-attr <key=value>]... [--registry-tools ynh] [--exit-on-stdin-eof]
+          [--resource-attr <key=value>]... [--registry-tools ynh] [--key-file <path>] [--exit-on-stdin-eof]
 ```
 
 Prints its OTLP/HTTP endpoint as its first line of output, then runs until stopped (Ctrl-C,
@@ -156,8 +164,9 @@ exit it prints a line on stderr counting what it accepted, refused and stripped.
 | `--max-request` | `4194304` | The largest request accepted, in bytes after decompression. |
 | `--max-memory` | `67108864` | The most bytes of requests held at once. |
 | `--rate` | `100` | Requests accepted a second, sustained (burst 200). |
-| `--resource-attr` | none | `key=value`, repeatable. Sets the attribute on the resource of every span, metric and log record the relay writes, replacing a value the vendor sent for the same key. The key must be an attribute a `--registry-tools` registry declares, such as `ynh.session.id`; any other key, a key on the strip list, an empty value, an unreadable registry, or a registry that lists an attribute outside its own tool's prefix is refused at start-up. |
+| `--resource-attr` | none | `key=value`, repeatable. Sets the attribute on the resource of every span, metric and log record the relay writes, replacing a value the vendor sent for the same key. The key must be an attribute a `--registry-tools` registry declares, such as `ynh.session.id`; any other key, a key on the strip list, an empty value, a value the strip rules would drop (an email address, or the home folder or a path under it), an unreadable registry, or a registry that lists an attribute outside its own tool's prefix is refused at start-up, and so is any `--resource-attr` on a standing relay (a fixed `--listen` port), which serves many launches and cannot know which one a record belongs to (ADR-004). |
 | `--registry-tools` | `ynh` | The tools whose registries say which `--resource-attr` keys are allowed, each run by bare name on `PATH` as `<tool> telemetry registry --format json`. Read only when `--resource-attr` is given. `YNR_REGISTRY_TOOLS`. |
+| `--key-file` | none | The file holding the key that hashes account ids (below): 32 bytes, raw or as 64 hex characters, mode `0600`. A file that group or others can read, that lies under the spool folder or root, that is not a regular file, or that is the wrong size is refused at start-up. `YNR_RELAY_KEY_FILE`. The key's value is never taken from the environment. |
 | `--exit-on-stdin-eof` | off | Also stops when standard input closes, so the relay ends with the process that started it. |
 
 It accepts OTLP/HTTP, protobuf or JSON, optionally gzipped, on `/v1/traces`, `/v1/metrics` and
@@ -169,9 +178,19 @@ doctor` read for the spool's `local/` folder, and it refuses to start while anot
 holds that folder. When the port is taken it says so, naming the relay that holds it if that relay
 writes into the same folder. A relay on port `0`, such as a run's, records nothing.
 
+A relay also counts the attribute names on Claude Code's records (instrumentation scope
+`com.anthropic.claude_code`) that are not on the list verified for the pinned Claude Code version
+(`internal/relay/claude-code-attributes.txt`, version in `internal/relay/vendor.go`). A standing
+relay writes the names and counts, never values, to `.ynr-relay-attrs.json` in its folder, which
+`ynr doctor` shows as the `vendor` check, and every relay prints them when it stops. See
+[Re-verify the Claude Code attribute list](../how-to/re-verify-the-claude-code-attribute-list.md).
+
 The default limits fit many seats at once. A Claude Code process sends well under one request a
-second, and a test sends 160 requests from 40 senders at one instant through one relay without a
-refusal. Against `--max-memory`, an uncompressed request of known length counts its own length;
+second, and a test sends 160 requests from 40 senders, one connection each, at one instant through one relay
+without a refusal. The operating system's listen queue bounds how many new connections can arrive in
+the same instant (128 on macOS, `kern.ipc.somaxconn`); the relay accepts as fast as Go does, and a
+burst above the queue is reset by the kernel before the relay sees it, so an exporter should keep
+its connection open and retry a refused connect, as OTLP exporters do. Against `--max-memory`, an uncompressed request of known length counts its own length;
 a gzipped or chunked one counts the full `--max-request`, so 16 of those at most are read at
 once at the defaults, and more are refused with `503` and `Retry-After`.
 
@@ -180,16 +199,27 @@ the user or a path on it (ADR-006, rule 10), wherever they appear in traces, met
 the scope, a span, a span event or link, a data point or exemplar, or a log record. It drops:
 
 - `user.email`, `user.full_name`, `cwd`, `host.name`, `host.id`, `host.ip`, `host.mac`, `process.owner`, `process.command`,
-  `process.command_line`, `process.command_args` and `process.executable.path`;
+  `process.command_line`, `process.command_args`, `process.executable.path`, and the tool details Claude Code adds under
+  `OTEL_LOG_TOOL_DETAILS=1`, `tool_input` and `tool_parameters`, dropped whole whatever their value (the seat name of a desk
+  subagent survives on `agent.name`, `agent_type` and `subagent_type`);
 - any attribute whose whole value is an email address (a sentence or URL mentioning one is kept);
 - any attribute whose value is the user's home folder or an absolute path under it.
 
 A list holding such a value is dropped whole; inside a map value, just the offending keys go.
 `user.name`, which ADR-002 uses for a person's host-qualified handle, is kept until ADR-006
-settles it. Account ids such as `user.id` are kept raw until the relay hashes them (ADR-006
-rule 10).
+settles it.
 
-They are dropped, not hashed. The count is the `attributes stripped` figure in the exit line. Only
+Account ids, `user.id`, `user.account_uuid`, `user.account_id` and `organization.id`, are never
+kept raw (ADR-006 rule 10). With `--key-file` the relay replaces each, wherever it appears, by
+`<key id>:<hex HMAC-SHA-256 of the id under the key>`: the same id and key always give the same
+value, so an account groups together across records and relay restarts, and the value cannot be
+read back. The key id is 8 hex characters derived one way from the key, so a reader can tell which
+key made a value. The key is never written to the spool, a log, the exit line or `ynr info`. With
+no key, as in a per-run relay, the relay drops the four attributes and counts them as stripped.
+Losing or changing the key breaks the grouping across the change: an account before and after
+counts as two, nothing older is exposed, and two Wheelhouses with different keys cannot be linked.
+
+The other attributes are dropped, not hashed. The count is the `attributes stripped` figure in the exit line. Only
 attributes are scrubbed, not a log record's body or a span's name.
 
 `--resource-attr` runs after that, so it has the last word on its keys. A relay belongs to one
@@ -206,8 +236,7 @@ ynr telemetry registry [--format text|json]
 ```
 
 Prints the names ynr itself writes: `ynr.provenance`, `ynr.provenance.warning`, `ynr.collector.id`,
-`ynr.collector.instance`, `ynr.received_at`, `ynr.registry`, `ynr.registry.name`, and the metrics `ynr.spool.evicted` and
-`ynr.registry.unknown_names`. `--format json` prints the registry as JSON, in the shape every YN tool's
+`ynr.collector.instance`, `ynr.received_at`, `ynr.registry` and `ynr.registry.name`; it declares no metrics. `--format json` prints the registry as JSON, in the shape every YN tool's
 `telemetry registry --format json` prints: `tool`, `version`, `semantic_conventions`, `attributes`,
 `spans`, `events` and `metrics`.
 
@@ -229,7 +258,10 @@ ynr conformance [--file .ynr/conformance.yaml] [--format text|json] [--timeout 6
 Exit 1 if any check fails, 30 if the file cannot be read. The stub vendor and the tool under test
 are found by bare name on `PATH`, and so is `ynm`, for rule 13: with it present, each scenario's runs get a
 scratch `YNM_HOME` (other `YNM_*` variables are dropped), and the check fails if `ynm export` shows a record
-added, changed or removed, or a canary in one. Without `ynm` that rule is skipped. The file's format is in
+added, changed or removed, or a canary in one. Without `ynm` that rule is skipped. Every run also starts an
+in-process relay and sends the scrub fixture through it, and fails (exit 1), independent of the scenarios, if a
+scrubbed key or account id reaches the relay's spool: see
+[What the scrub check does](../how-to/add-conformance-to-ci.md#what-the-scrub-check-does). The file's format is in
 [Add ynr conformance to a tool's CI](../how-to/add-conformance-to-ci.md).
 
 ### ynr tail

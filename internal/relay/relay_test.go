@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -110,7 +111,7 @@ func spoolLines(t *testing.T, dir string) []string {
 		t.Fatal(err)
 	}
 	for _, e := range entries {
-		if e.Name() == spool.RelayLockName {
+		if e.Name() == spool.RelayLockName || e.Name() == spool.RelayAttrsName {
 			continue
 		}
 		if !strings.HasSuffix(e.Name(), ".jsonl") || strings.HasSuffix(e.Name(), ".open.jsonl") {
@@ -272,6 +273,21 @@ func TestNew_Refuses(t *testing.T) {
 		if _, err := New(cfg); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// TestNew_RefusesResourceAttrOnStandingRelay: a relay on a fixed port serves many launches, so it
+// cannot stamp one launch's attribute on all of them (ADR-004, ynr #119); one on port 0 can.
+func TestNew_RefusesResourceAttrOnStandingRelay(t *testing.T) {
+	attrs := map[string]string{"ynh.session.id": "s"}
+	_, err := New(Config{Dir: t.TempDir(), Listen: freePort(t), ResourceAttrs: attrs})
+	if err == nil || !strings.Contains(err.Error(), "per-launch relay") {
+		t.Errorf("standing relay with a resource attribute: err = %v", err)
+	}
+	if r, err := New(Config{Dir: t.TempDir(), ResourceAttrs: attrs}); err != nil {
+		t.Errorf("per-launch relay refused: %v", err)
+	} else {
+		_ = r.ln.Close()
 	}
 }
 
@@ -507,6 +523,13 @@ func freePort(t *testing.T) string {
 // must reach the spool: none refused as busy or rate limited. Reserving the largest request size
 // for each, the default memory limit held only 16 at once, and under load this test saw 16 of 160
 // refused as busy; each now reserves its own length.
+//
+// Each seat is one client with one keep-alive connection, as an OTLP exporter is, so 40
+// connections open at once and each carries its seat's four requests in turn. The test once opened
+// 160 connections in the same instant instead. On macOS the kernel's listen queue
+// (kern.ipc.somaxconn, 128) cannot hold that many unaccepted connections, and it reset the
+// overflow ("connection reset by peer", about 3 runs in 20) before the relay ever saw it: a limit
+// of the operating system that no relay code can raise, not a loss by the relay (ynr #120).
 func TestRelay_ManySeatsAtDefaults(t *testing.T) {
 	const seats, each = 40, 4
 	r, stop := start(t, Config{Listen: freePort(t)})
@@ -518,24 +541,23 @@ func TestRelay_ManySeatsAtDefaults(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
+			tr := &http.Transport{MaxConnsPerHost: 1}
+			defer tr.CloseIdleConnections()
+			client := &http.Client{Transport: tr}
 			<-gate
-			var inner sync.WaitGroup
 			for range each {
-				inner.Add(1)
-				go func() {
-					defer inner.Done()
-					req, _ := http.NewRequest(http.MethodPost, r.Endpoint()+"/v1/traces", bytes.NewReader(body))
-					req.Header.Set("Content-Type", "application/x-protobuf")
-					resp, err := http.DefaultClient.Do(req)
-					if err != nil {
-						codes <- 0
-						return
-					}
-					_ = resp.Body.Close()
-					codes <- resp.StatusCode
-				}()
+				req, _ := http.NewRequest(http.MethodPost, r.Endpoint()+"/v1/traces", bytes.NewReader(body))
+				req.Header.Set("Content-Type", "application/x-protobuf")
+				resp, err := client.Do(req)
+				if err != nil {
+					t.Log(err)
+					codes <- 0
+					continue
+				}
+				_, _ = io.Copy(io.Discard, resp.Body)
+				_ = resp.Body.Close()
+				codes <- resp.StatusCode
 			}
-			inner.Wait()
 		}()
 	}
 	close(gate)
@@ -730,6 +752,26 @@ func TestRelay_StampsAfterTheStripList(t *testing.T) {
 	}
 }
 
+// TestNew_RefusesStrippableResourceAttrValue: the stamp comes after the strip, so a value the strip
+// rules would drop (an email address, a path under the home folder) is refused (ynr #125).
+func TestNew_RefusesStrippableResourceAttrValue(t *testing.T) {
+	const home = "/Users/someone"
+	for _, v := range []string{"me@example.com", home, home + "/src/x"} {
+		_, err := New(Config{Dir: t.TempDir(), Home: home, ResourceAttrs: map[string]string{"ynh.session.id": v}})
+		if err == nil || !strings.Contains(err.Error(), "email address or a path") {
+			t.Errorf("%q: err = %v", v, err)
+		}
+	}
+	for _, v := range []string{"sess-1", "a@b", "/Users/someoneelse/x", "/tmp/x"} {
+		r, err := New(Config{Dir: t.TempDir(), Home: home, ResourceAttrs: map[string]string{"ynh.session.id": v}})
+		if err != nil {
+			t.Errorf("%q refused: %v", v, err)
+			continue
+		}
+		_ = r.ln.Close()
+	}
+}
+
 func TestNew_RefusesEmptyResourceAttr(t *testing.T) {
 	for _, m := range []map[string]string{{"": "v"}, {"ynh.session.id": ""}} {
 		if _, err := New(Config{Dir: t.TempDir(), ResourceAttrs: m}); err == nil {
@@ -742,6 +784,192 @@ func TestNew_RefusesStripListedResourceAttr(t *testing.T) {
 	for _, k := range Stripped {
 		if _, err := New(Config{Dir: t.TempDir(), ResourceAttrs: map[string]string{k: "v"}}); err == nil {
 			t.Errorf("accepted the strip-listed key %q", k)
+		}
+	}
+}
+
+// TestRelay_StripsToolDetailsKeepsSeatNames uses a fixture shaped like the probe output of Claude
+// Code 2.1.316 with OTEL_LOG_TOOL_DETAILS=1: tool_input and tool_parameters ride on log records
+// and spans (and, to be safe, resources, scopes, events, links and data points), while the seat
+// name of a desk subagent is on agent.name, agent_type and the span's subagent_type.
+func TestRelay_StripsToolDetailsKeepsSeatNames(t *testing.T) {
+	leaky := func(m pcommon.Map) {
+		m.PutStr("tool_input", `{"command":"cat /etc/hosts","file_path":"/srv/app/secret.txt"}`)
+		m.PutStr("tool_parameters", `{"bash_command":"ls","full_command":"ls -la"}`)
+		m.PutEmptyMap("tool_input.map").PutStr("command", "x") // not the stripped name: kept
+		m.PutStr("agent.name", "hannett")
+		m.PutStr("agent_type", "hannett")
+		m.PutStr("subagent_type", "hannett")
+		m.PutStr("tool_name", "Bash")
+	}
+	dir := t.TempDir()
+	r, stop := start(t, Config{Dir: dir})
+
+	td := ptrace.NewTraces()
+	rs := td.ResourceSpans().AppendEmpty()
+	leaky(rs.Resource().Attributes())
+	ss := rs.ScopeSpans().AppendEmpty()
+	leaky(ss.Scope().Attributes())
+	sp := ss.Spans().AppendEmpty()
+	sp.SetName("claude_code.tool")
+	sp.SetTraceID([16]byte{1})
+	sp.SetSpanID([8]byte{2})
+	leaky(sp.Attributes())
+	leaky(sp.Events().AppendEmpty().Attributes())
+	leaky(sp.Links().AppendEmpty().Attributes())
+	tb, _ := ptraceotlp.NewExportRequestFromTraces(td).MarshalProto()
+	if resp := post(t, r.Endpoint()+"/v1/traces", "application/x-protobuf", tb, false); resp.StatusCode != 200 {
+		t.Fatalf("traces: %d", resp.StatusCode)
+	}
+
+	md := pmetric.NewMetrics()
+	rm := md.ResourceMetrics().AppendEmpty()
+	leaky(rm.Resource().Attributes())
+	m := rm.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
+	m.SetName("claude_code.token.usage")
+	dp := m.SetEmptySum().DataPoints().AppendEmpty()
+	leaky(dp.Attributes())
+	leaky(dp.Exemplars().AppendEmpty().FilteredAttributes())
+	mb, _ := pmetricotlp.NewExportRequestFromMetrics(md).MarshalProto()
+	if resp := post(t, r.Endpoint()+"/v1/metrics", "application/x-protobuf", mb, false); resp.StatusCode != 200 {
+		t.Fatalf("metrics: %d", resp.StatusCode)
+	}
+
+	ld := plog.NewLogs()
+	rl := ld.ResourceLogs().AppendEmpty()
+	leaky(rl.Resource().Attributes())
+	lr := rl.ScopeLogs().AppendEmpty().LogRecords().AppendEmpty()
+	lr.SetEventName("claude_code.tool_result")
+	leaky(lr.Attributes())
+	lb, _ := plogotlp.NewExportRequestFromLogs(ld).MarshalProto()
+	if resp := post(t, r.Endpoint()+"/v1/logs", "application/x-protobuf", lb, false); resp.StatusCode != 200 {
+		t.Fatalf("logs: %d", resp.StatusCode)
+	}
+
+	stop()
+	lines := spoolLines(t, dir)
+	if len(lines) != 3 {
+		t.Fatalf("lines = %d, want 3", len(lines))
+	}
+	for i, l := range lines {
+		for _, bad := range []string{`"tool_input"`, `"tool_parameters"`, "cat /etc/hosts", "secret.txt", "full_command"} {
+			if strings.Contains(l, bad) {
+				t.Errorf("line %d still carries %s: %s", i, bad, l)
+			}
+		}
+		for _, good := range []string{`"agent.name"`, `"agent_type"`, `"subagent_type"`, `"tool_name"`, `"hannett"`} {
+			if !strings.Contains(l, good) {
+				t.Errorf("line %d lost %s: %s", i, good, l)
+			}
+		}
+	}
+	// Two attributes from each of 10 leaky maps: five in the trace, three in the metrics, two in the logs.
+	if s := r.Stats(); s.Stripped != 2*10 {
+		t.Errorf("stripped = %d, want 20", s.Stripped)
+	}
+}
+
+// claudeLogs builds a logs request under the scope name Claude Code exports with.
+func claudeLogs(t *testing.T, scope string, attrs map[string]string) []byte {
+	t.Helper()
+	ld := plog.NewLogs()
+	sl := ld.ResourceLogs().AppendEmpty().ScopeLogs().AppendEmpty()
+	sl.Scope().SetName(scope)
+	lr := sl.LogRecords().AppendEmpty()
+	for k, v := range attrs {
+		lr.Attributes().PutStr(k, v)
+	}
+	b, err := plogotlp.NewExportRequestFromLogs(ld).MarshalProto()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+// TestRelay_CountsUnknownClaudeCodeNames: a name on a Claude Code record that is not on the
+// pinned list is counted, by name only; known names, a stripped name, another vendor's names and
+// a Claude Code resource attribute are not; and a standing relay records the names for ynr doctor
+// without any value.
+func TestRelay_CountsUnknownClaudeCodeNames(t *testing.T) {
+	dir := t.TempDir()
+	r, stop := start(t, Config{Dir: dir, Listen: freePort(t)})
+	scope := "com.anthropic.claude_code.events"
+
+	body := claudeLogs(t, scope, map[string]string{
+		"tool_name":        "Bash",    // known
+		"agent.name":       "hannett", // known
+		"tool_input":       "ls",      // stripped, and on the list
+		"new_vendor_field": "SECRET-VALUE-1",
+		"another.new":      "SECRET-VALUE-2",
+	})
+	for range 2 {
+		if resp := post(t, r.Endpoint()+"/v1/logs", "application/x-protobuf", body, false); resp.StatusCode != 200 {
+			t.Fatalf("logs: %d", resp.StatusCode)
+		}
+	}
+	// Another vendor's unknown names are not this list's business.
+	other := claudeLogs(t, "codex", map[string]string{"codex_only": "x"})
+	if resp := post(t, r.Endpoint()+"/v1/logs", "application/x-protobuf", other, false); resp.StatusCode != 200 {
+		t.Fatalf("logs: %d", resp.StatusCode)
+	}
+
+	want := map[string]int64{"new_vendor_field": 2, "another.new": 2}
+	got := r.Stats().Unknown
+	if len(got) != len(want) || got["new_vendor_field"] != 2 || got["another.new"] != 2 {
+		t.Errorf("unknown = %v, want %v", got, want)
+	}
+
+	// The 2s flush writes the record while the relay runs; stop writes the final one.
+	stop()
+	a, err := spool.ReadRelayAttrs(dir)
+	if err != nil || a == nil {
+		t.Fatalf("attrs record = %v, %v", a, err)
+	}
+	if a.Version != ClaudeCodePin || a.Unknown["new_vendor_field"] != 2 || a.Unknown["another.new"] != 2 || len(a.Unknown) != 2 {
+		t.Errorf("record = %+v", a)
+	}
+	raw, _ := os.ReadFile(filepath.Join(dir, spool.RelayAttrsName))
+	if strings.Contains(string(raw), "SECRET-VALUE") {
+		t.Errorf("record holds a value: %s", raw)
+	}
+}
+
+// TestRelay_UnknownNamesAreBounded: a name that is not made of name characters, and any beyond the
+// limit, are counted under one placeholder instead of being kept.
+func TestRelay_UnknownNamesAreBounded(t *testing.T) {
+	var u unknownSet
+	u.add("/Users/someone/secret")
+	u.add(strings.Repeat("a", maxNameLen+1))
+	for i := range maxUnknownNames + 10 {
+		u.add("n" + strconv.Itoa(i))
+	}
+	c, _ := u.snapshot(false)
+	if c[OtherName] < 2+10 {
+		t.Errorf("placeholder count = %d, want at least 12", c[OtherName])
+	}
+	if len(c) > maxUnknownNames {
+		t.Errorf("kept %d names", len(c))
+	}
+	for k := range c {
+		if strings.Contains(k, "/") {
+			t.Errorf("kept %q", k)
+		}
+	}
+}
+
+// TestClaudeCodeList: the list parses, names the pin's tool details and is free of blanks.
+func TestClaudeCodeList(t *testing.T) {
+	for _, n := range []string{"tool_input", "tool_parameters", "agent.name", "session.id"} {
+		if !ClaudeCodeAttributes[n] {
+			t.Errorf("%s missing from the list", n)
+		}
+	}
+	if ClaudeCodeAttributes[""] || ClaudeCodeAttributes["#"] {
+		t.Error("blank or comment parsed as a name")
+	}
+	for n := range ClaudeCodeAttributes {
+		if !usableName(n) {
+			t.Errorf("%q is not a usable name", n)
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -177,7 +178,12 @@ var registryPattern = regexp.MustCompile(`^registries/([a-z0-9][a-z0-9._-]{0,62}
 // tool and version sit side by side:
 //
 //	registries/<collector id>/<tool>/<version>/<sha256>.json
+//
+// A version's SemVer build metadata (the +... suffix, as in 0.3.0+1d16688) is left out of the key:
+// SemVer ignores it when comparing versions, and '+' is not a character every adapter accepts in a
+// key. The registry object itself keeps the full version.
 func RegistryKey(collector, tool, version, sha256 string) string {
+	version, _, _ = strings.Cut(version, "+")
 	return fmt.Sprintf("registries/%s/%s/%s/%s.json", collector, tool, version, sha256)
 }
 
