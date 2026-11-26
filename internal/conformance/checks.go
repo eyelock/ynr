@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -626,7 +627,7 @@ func (k *checker) rule7() {
 	} else if checked == 0 {
 		k.skip(7, name+": records", "the tool wrote no name under its "+prefix+" prefix; names outside it need Weaver and the semantic conventions")
 	} else {
-		k.pass(7, name+": records", fmt.Sprintf("%d names under %s are all declared; names outside the prefix are not checked without Weaver", checked, prefix))
+		k.pass(7, name+": records", fmt.Sprintf("%d names under %s are all declared; names outside the prefix are checked by Weaver's live check when weaver is on the PATH", checked, prefix))
 	}
 
 	k.registryPrinted()
@@ -711,20 +712,43 @@ func (k *checker) registryPrinted() {
 	k.pass(7, name, "the printed registry has the names the registry files declare")
 }
 
-// weaver runs Weaver's registry check when weaver is on the PATH.
+// weaver runs Weaver's registry check on the tool's registry and then its live check of the
+// records the tool wrote, when weaver is on the PATH.
 func (k *checker) weaver() {
 	const name = "names: Weaver"
+	if k.o.NoWeaver {
+		k.skip(7, name, "skipped (Weaver switched off)")
+		return
+	}
 	path, err := exec.LookPath("weaver")
 	if err != nil {
 		k.skip(7, name, "skipped (weaver not on PATH)")
 		return
 	}
+	reg := k.f.Registry
+	if !filepath.IsAbs(reg) {
+		reg = filepath.Join(k.o.Dir, reg)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, path, "registry", "check", "-r", k.f.Registry).CombinedOutput()
+	out, err := exec.CommandContext(ctx, path, "registry", "check", "-r", reg).CombinedOutput()
 	if err != nil {
 		k.fail(7, name, "weaver registry check failed", excerpt(string(out)))
 		return
 	}
-	k.skip(7, name, "weaver registry check passed; weaver's live check of the records is not run by this version, ynr's own name check above covers the tool's prefix")
+	var lines [][]byte
+	for _, cp := range k.toolCaptures() {
+		lines = append(lines, cp.c.Lines...)
+	}
+	findings, sent, err := liveCheck(context.Background(), path, reg, k.f.Service, lines)
+	switch {
+	case err != nil:
+		k.fail(7, name+" live check", "weaver's live check could not run", excerpt(err.Error()))
+	case len(findings) > 0:
+		k.fail(7, name+" live check", fmt.Sprintf("weaver's live check found %d violation(s) in the tool's records", len(findings)), findings...)
+	case sent == 0:
+		k.fail(7, name+" live check", "weaver's live check ran but the tool wrote it no records to check")
+	default:
+		k.pass(7, name+" live check", fmt.Sprintf("weaver registry check passed, and weaver's live check found no violation in %d resource batch(es) of the tool's records", sent))
+	}
 }

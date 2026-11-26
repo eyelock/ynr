@@ -38,7 +38,7 @@ const (
 	ProvenanceWarningNoManifest = "no-manifest"
 	// A run's records whose manifest was refused.
 	ProvenanceWarningBadManifest = "bad-manifest"
-	// A run folder that exceeded its budget
+	// A run folder that exceeded its budget, so ynr stopped reading it.
 	ProvenanceWarningOverBudget = "over-budget"
 )
 

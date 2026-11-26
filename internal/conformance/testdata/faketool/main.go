@@ -259,6 +259,10 @@ func run(args []string) int {
 		if breaks["canary"] {
 			run.Attributes().PutStr("fake.task_len", task)
 		}
+		if breaks["foreignattr"] {
+			// Outside the tool's prefix, so only Weaver's live check sees it.
+			run.Attributes().PutStr("acme.undeclared", "x")
+		}
 		if breaks["unregistered"] {
 			run.Attributes().PutStr("fake.mystery", "x")
 		}
@@ -278,7 +282,10 @@ func run(args []string) int {
 	resource(rm.Resource())
 	m := rm.ScopeMetrics().AppendEmpty().Metrics().AppendEmpty()
 	m.SetName("fake.run.count")
+	m.SetUnit("{run}")
 	sum := m.SetEmptySum()
+	sum.SetIsMonotonic(true)
+	sum.SetAggregationTemporality(pmetric.AggregationTemporalityDelta)
 	dp := sum.DataPoints().AppendEmpty()
 	dp.SetTimestamp(pcommon.NewTimestampFromTime(end))
 	dp.SetIntValue(1)

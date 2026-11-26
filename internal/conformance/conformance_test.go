@@ -74,7 +74,7 @@ func runFake(t *testing.T, breaks string) *Report {
 func runScenarios(t *testing.T, scenarios string, env map[string]string) *Report {
 	t.Helper()
 	rep, err := Run(context.Background(), Options{
-		File: conformanceFile(t, scenarios), Dir: t.TempDir(), Timeout: 20 * time.Second, KillWait: 4 * time.Second, Env: env,
+		File: conformanceFile(t, scenarios), Dir: t.TempDir(), Timeout: 20 * time.Second, KillWait: 4 * time.Second, Env: env, NoWeaver: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -345,5 +345,69 @@ func TestMemoryIsolated(t *testing.T) {
 	}
 	if ents, _ := os.ReadDir(real); len(ents) != 0 {
 		t.Errorf("the operator's YNM_HOME was touched: %v", ents)
+	}
+}
+
+// needWeaver skips, or when YNR_REQUIRE_WEAVER is set fails, a test that needs weaver. CI sets it, which installs Weaver: a missing weaver is then a failure, not a
+// skip, so the live check cannot quietly stop running.
+func needWeaver(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("weaver"); err != nil {
+		if os.Getenv("YNR_REQUIRE_WEAVER") != "" {
+			t.Fatal("YNR_REQUIRE_WEAVER is set, but weaver is not on the PATH")
+		}
+		t.Skip("weaver is not on the PATH")
+	}
+}
+
+func runWithWeaver(t *testing.T, breaks string) *Report {
+	t.Helper()
+	rep, err := Run(context.Background(), Options{
+		File: conformanceFile(t, converged), Dir: t.TempDir(), Timeout: 20 * time.Second, KillWait: 4 * time.Second,
+		Env: map[string]string{"FAKE_BREAK": breaks},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rep
+}
+
+func liveCheck7(rep *Report) *Check {
+	for i, c := range rep.Scenarios[0].Checks {
+		if c.Rule == 7 && strings.Contains(c.Name, "live check") {
+			return &rep.Scenarios[0].Checks[i]
+		}
+	}
+	return nil
+}
+
+// TestWeaverLiveCheckRuns: a conforming tool passes Weaver's live check, and the check ran: it
+// is a pass, not a skip.
+func TestWeaverLiveCheckRuns(t *testing.T) {
+	needWeaver(t)
+	rep := runWithWeaver(t, "")
+	c := liveCheck7(rep)
+	if c == nil || c.Status != Pass {
+		t.Fatalf("Weaver's live check did not pass:\n%s", dump(rep))
+	}
+	if !rep.OK {
+		t.Fatalf("a conforming tool failed:\n%s", dump(rep))
+	}
+}
+
+// TestWeaverLiveCheckFindsForeignAttribute: an attribute outside the tool's prefix that no registry
+// declares passes ynr's own name check but fails Weaver's live check.
+func TestWeaverLiveCheckFindsForeignAttribute(t *testing.T) {
+	needWeaver(t)
+	rep := runWithWeaver(t, "foreignattr")
+	c := liveCheck7(rep)
+	if c == nil || c.Status != Fail {
+		t.Fatalf("Weaver's live check did not fail:\n%s", dump(rep))
+	}
+	if !strings.Contains(c.Detail+strings.Join(c.Evidence, " "), "acme.undeclared") {
+		t.Errorf("the failure does not name the attribute:\n%s", dump(rep))
+	}
+	if rep.OK {
+		t.Fatal("the report passed")
 	}
 }
