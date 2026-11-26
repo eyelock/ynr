@@ -158,3 +158,36 @@ func putLines(t *testing.T, r store.Reader, key string, lines ...[]byte) {
 		t.Fatal(err)
 	}
 }
+
+// TestCompactionSurvivesAPartWrittenWithoutItsManifest: a crash between a part and its manifest
+// leaves an orphan part; the next pass completes the hour past it, and a later pass prunes it.
+func TestCompactionSurvivesAPartWrittenWithoutItsManifest(t *testing.T) {
+	ctx := context.Background()
+	r := openStore(t)
+	hour := now.Truncate(time.Hour).Add(-3 * time.Hour)
+	line := traceLine(t, runSpan(traceA, "1111111111111111", "", "converged", "m", 1, hour.Add(5*time.Minute)))
+	ship(t, r, store.Traces, hour.Add(10*time.Minute), "local.a", line)
+	orphan := store.PartKey(store.Traces, hour, 1)
+	if err := r.Put(ctx, orphan, []byte("not a complete part")); err != nil {
+		t.Fatal(err)
+	}
+	if n := compact(t, r, hour.Add(time.Hour+11*time.Minute)); n != 1 {
+		t.Fatalf("compacted %d hours past the orphan, want 1", n)
+	}
+	h, err := ReadHour(ctx, r, store.Traces, hour)
+	if err != nil || h.Manifest == nil || h.Manifest.N != 2 || len(h.Batches) != 0 {
+		t.Fatalf("after compacting: %+v %+v %v", h, h.Manifest, err)
+	}
+	if got := runsCount(t, r); got != 1 {
+		t.Fatalf("%d runs after compacting", got)
+	}
+	compact(t, r, hour.Add(3*time.Hour)) // past Keep: prunes the orphan and the batch
+	for _, k := range keys(t, r, store.CompactedPrefix(store.Traces, hour)) {
+		if k == orphan {
+			t.Fatalf("the orphan part was not pruned")
+		}
+	}
+	if got := keys(t, r, HourPrefix(store.Traces, hour)); len(got) != 0 {
+		t.Fatalf("batches were not pruned: %v", got)
+	}
+}
