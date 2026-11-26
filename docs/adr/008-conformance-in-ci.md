@@ -114,7 +114,23 @@ as an ordinary step; there is no separate action to maintain, and no token is ne
   full-chain scenario and the scheduled real-vendor job) lives in the sibling repositories and
   was not checked for this addendum.
 
+2026-11-26, Weaver's live check is built ([ynr #172](https://github.com/eyelock/ynr/issues/172)). It supersedes the
+"Not built: Weaver's live check" item above:
+
+- **Built: Weaver's live check.** When `weaver` is on `PATH`, `ynr conformance` runs `weaver registry
+  check` on the tool's registry, then starts `weaver registry live-check` on it, replays the tool's own
+  records (those whose `service.name` is the tool's) to it over OTLP, and fails rule 7 on any violation Weaver
+  reports. The conventions the registry depends on all count, so a tool need not list every standard
+  attribute it uses. The report line is `names: Weaver live check`, a pass or a fail, never a skip once weaver is
+  installed ([internal/conformance/live.go](../../internal/conformance/live.go)).
+- **Built: the CI job.** The `weaver` job in `.github/workflows/ci.yml` installs a pinned Weaver release, checks
+  its sha256, runs `weaver registry check` on ynr's registry, and runs the tests that drive the fake tool through the
+  live check: a conforming run passes it, and a run emitting an attribute no registry declares fails it. It is
+  part of All Clear, so it runs on every pull request.
+- Still true: a tool's own CI must install weaver for its `ynr conformance` run to include the live check.
+
 ## History
 
 - 2026-10-05: drafted.
 - 2026-11-23: Addendum records what is built and what is not (ynr #159).
+- 2026-11-26: Addendum records Weaver's live check as built (ynr #172).

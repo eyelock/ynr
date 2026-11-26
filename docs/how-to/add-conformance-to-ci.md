@@ -132,7 +132,11 @@ The report names the records by id, type and level, never by content.
 
 A check that cannot run says `SKIPPED` and does not fail the job:
 
-- Weaver's live check of names runs only when `weaver` is on `PATH`.
+- Weaver's checks (`weaver registry check` on the registry, then the live check of the records) run only
+  when `weaver` is on `PATH`. Install a pinned release in the job, as ynr's own `ci.yml` does, so they run. The
+  live check replays the tool's own records (those whose `service.name` is the tool's) to `weaver registry live-check`
+  and fails the check on any violation, such as an attribute neither your registry nor the semantic conventions it
+  depends on declare. The report's `names: Weaver live check` line says it ran.
 - Rule 4 is skipped when no process the tool started wrote spans, and HTTP calls between tools are
   not checked.
 - Rule 13, that telemetry never reaches ynm's memory, is skipped when `ynm` is not on `PATH`, or when

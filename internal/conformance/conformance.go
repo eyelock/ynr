@@ -30,6 +30,9 @@ type Options struct {
 	// Relay starts the relay the scrub check (rule 10) sends its fixture through; empty takes
 	// the relay compiled into this binary.
 	Relay RelayStarter
+	// NoWeaver skips Weaver's checks of the registry and the records even when weaver is on the
+	// PATH: for tests that are about other rules and need not start it for every scenario.
+	NoWeaver bool
 	// Keep leaves the temporary folders in place, and names them in the report.
 	Keep bool
 }
