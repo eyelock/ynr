@@ -68,6 +68,8 @@ accepted.
 Run `ynr tail` in another terminal while Claude Code runs; it prints Claude Code's spans as they are
 written. About fifteen seconds after the run, they are in the store too: `ynr query recent` lists the runs that carry a `ynh.run` span, and
 `ynr query trace <trace id>` prints a trace, Claude Code's spans included, as a tree.
+`ynr query seats`, `subagents` and `accounts` total Claude Code's own tokens, cost and active time
+([Named queries](../reference/named-queries.md#claude-codes-own-records)).
 
 ## When nothing arrives
 

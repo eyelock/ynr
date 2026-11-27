@@ -234,4 +234,7 @@ WHERE $lane = '' OR lane = $lane
 GROUP BY ALL
 ORDER BY cost_usd DESC NULLS LAST, model`,
 	},
+	claudeSeats,
+	claudeSubagents,
+	claudeAccounts,
 }
