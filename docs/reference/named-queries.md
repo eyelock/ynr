@@ -143,7 +143,7 @@ Claude Code's tokens, cost and active time by day for each seat, from its `claud
 | Column | Meaning |
 |---|---|
 | `day` | The UTC day, `YYYY-MM-DD`. |
-| `seat` | The harness name, or `(unknown)`. |
+| `seat` | The harness name from the session's `ynh.session` span, or `(unknown)`. |
 | `input_tokens`, `output_tokens` | Tokens of `type` `input` and `output`. |
 | `cache_read_tokens`, `cache_creation_tokens` | Tokens of `type` `cacheRead` and `cacheCreation`. |
 | `cost_usd` | The summed `claude_code.cost.usage`. |

@@ -3,6 +3,8 @@
 package query
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strings"
 	"testing"
@@ -36,13 +38,28 @@ func usageLine(t *testing.T, name string, temporality pmetric.AggregationTempora
 	return b
 }
 
+// sessionOf is the ynh.session.id of the launch a seat runs in. Claude Code's records carry that
+// id and never the harness name: the name is only on the ynh.session span (ynw-17xrm).
+func sessionOf(seat string) string {
+	return map[string]string{"ryder": "sess-r", "ynw": "sess-d1"}[seat]
+}
+
+// sessionSpan is the ynh.session span ynh run writes for a launch, naming the seat.
+func sessionSpan(t *testing.T, at time.Time, id, seat string) []byte {
+	// one span id per session: records with the same trace and span id are one record
+	sum := sha256.Sum256([]byte(id))
+	return traceLine(t, span{trace: hex.EncodeToString(sum[:16]), id: hex.EncodeToString(sum[16:24]), name: "ynh.session",
+		start: at, dur: time.Hour, res: map[string]any{"service.name": "ynh"},
+		attrs: map[string]any{"ynh.session.id": id, "ynh.harness.name": seat}})
+}
+
 func apiRequest(t *testing.T, at time.Time, seat, agent string, in, out int, cost float64) []byte {
 	attrs := map[string]any{"input_tokens": in, "output_tokens": out, "cache_read_tokens": 10, "cache_creation_tokens": 5,
 		"cost_usd": cost, "duration_ms": 2000}
 	if agent != "" {
 		attrs["agent.name"] = agent
 	}
-	return eventLine(t, "api_request", at, map[string]any{"ynh.harness.name": seat}, attrs)
+	return eventLine(t, "api_request", at, map[string]any{"ynh.session.id": sessionOf(seat)}, attrs)
 }
 
 // claudeFixture is a launched seat (ryder, delta metrics), the desk (ynw, a cumulative cost
@@ -52,9 +69,12 @@ func claudeFixture(t *testing.T) store.Reader {
 	d1 := now.Add(-24 * time.Hour)
 	d2 := now.Add(-time.Hour)
 	delta, cum := pmetric.AggregationTemporalityDelta, pmetric.AggregationTemporalityCumulative
-	ryder := map[string]any{"ynh.harness.name": "ryder", "user.account_uuid": "acct-a"}
-	desk := map[string]any{"ynh.harness.name": "ynw", "user.account_uuid": "acct-a"}
+	ryder := map[string]any{"ynh.session.id": "sess-r", "user.account_uuid": "acct-a"}
+	desk := map[string]any{"ynh.session.id": "sess-d1", "user.account_uuid": "acct-a"}
 	tok := func(kind string) map[string]any { return map[string]any{"type": kind, "model": "claude-opus-5-5"} }
+	// Each launch's ynh.session span is the only place its seat is named.
+	ship(t, r, store.Traces, d1.Add(time.Minute), "local.a",
+		sessionSpan(t, d1, "sess-r", "ryder"), sessionSpan(t, d1, "sess-d1", "ynw"), sessionSpan(t, d2, "sess-d2", "ynw"))
 	ship(t, r, store.Metrics, d1.Add(time.Minute), "local.a",
 		usageLine(t, "claude_code.token.usage", delta, 1000, d1, d1, ryder, tok("input")),
 		usageLine(t, "claude_code.token.usage", delta, 200, d1, d1, ryder, tok("output")),
@@ -67,7 +87,7 @@ func claudeFixture(t *testing.T) store.Reader {
 		usageLine(t, "claude_code.token.usage", delta, 50, d2, d2, ryder, tok("cacheRead")),
 		dup,
 		usageLine(t, "claude_code.cost.usage", cum, 5, d1, d2, desk, map[string]any{"session.id": "s-1"}),
-		usageLine(t, "claude_code.cost.usage", cum, 1, d2, d2, map[string]any{"ynh.harness.name": "ynw", "user.account_uuid": "acct-b"}, map[string]any{"session.id": "s-2"}))
+		usageLine(t, "claude_code.cost.usage", cum, 1, d2, d2, map[string]any{"ynh.session.id": "sess-d2", "user.account_uuid": "acct-b"}, map[string]any{"session.id": "s-2"}))
 	// the same batch shipped twice counts once
 	ship(t, r, store.Metrics, d2.Add(2*time.Minute), "local.a", dup)
 	ship(t, r, store.Logs, d2.Add(time.Minute), "local.a",
@@ -76,7 +96,7 @@ func claudeFixture(t *testing.T) store.Reader {
 		apiRequest(t, d2.Add(2*time.Second), "ynw", "reni", 50, 5, 0.1),
 		apiRequest(t, d2.Add(3*time.Second), "ynw", "", 20, 2, 0.05),
 		apiRequest(t, d2.Add(4*time.Second), "ryder", "", 70, 7, 0.2),
-		eventLine(t, "tool_result", d2, map[string]any{"ynh.harness.name": "ynw"}, map[string]any{"agent.name": "reni"}))
+		eventLine(t, "tool_result", d2, map[string]any{"ynh.session.id": "sess-d1"}, map[string]any{"agent.name": "reni"}))
 	return r
 }
 
@@ -152,6 +172,40 @@ func TestSubagentsNamedAndMain(t *testing.T) {
 		"ryder/(main)": "1 70 7 0.2 2",
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("subagents = %v\nwant %v", got, want)
+	}
+}
+
+// A record whose session has no span in the window is (unknown), and one that carries no
+// session id at all is too. Neither is dropped.
+func TestSeatsWithoutASessionSpanAreUnknown(t *testing.T) {
+	r := openStore(t)
+	d := now.Add(-time.Hour)
+	delta := pmetric.AggregationTemporalityDelta
+	ship(t, r, store.Traces, d, "local.a", sessionSpan(t, d, "sess-known", "ryder"))
+	ship(t, r, store.Metrics, d.Add(time.Minute), "local.a",
+		usageLine(t, "claude_code.cost.usage", delta, 1, d, d, map[string]any{"ynh.session.id": "sess-known"}, nil),
+		usageLine(t, "claude_code.cost.usage", delta, 2, d, d, map[string]any{"ynh.session.id": "sess-gone"}, nil),
+		usageLine(t, "claude_code.cost.usage", delta, 4, d, d, map[string]any{"user.account_uuid": "a"}, nil))
+	ship(t, r, store.Logs, d.Add(time.Minute), "local.a",
+		eventLine(t, "api_request", d, map[string]any{"ynh.session.id": "sess-known"}, map[string]any{"cost_usd": 0.5}),
+		eventLine(t, "api_request", d, map[string]any{"ynh.session.id": "sess-gone"}, map[string]any{"cost_usd": 0.25}))
+	res := run(t, r, "seats", Params{})
+	seat, cost := col(t, res, "seat"), col(t, res, "cost_usd")
+	got := map[string]string{}
+	for _, row := range res.Rows {
+		got[fmt.Sprint(row[seat])] = fmt.Sprint(row[cost])
+	}
+	if want := map[string]string{"ryder": "1", "(unknown)": "6"}; fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("seats = %v\nwant %v", got, want)
+	}
+	res = run(t, r, "subagents", Params{})
+	seat, cost = col(t, res, "seat"), col(t, res, "cost_usd")
+	got = map[string]string{}
+	for _, row := range res.Rows {
+		got[fmt.Sprint(row[seat])] = fmt.Sprint(row[cost])
+	}
+	if want := map[string]string{"ryder": "0.5", "(unknown)": "0.25"}; fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("subagents = %v\nwant %v", got, want)
 	}
 }

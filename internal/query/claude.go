@@ -12,6 +12,23 @@ import (
 // with the relay on is a seat here, and a desk subagent is named by the agent.name or agent_type
 // Claude Code puts on its api_request events. None has rollups: they read records, as recent does.
 
+// sessionSeats is the CTE that names a seat for Claude Code's records. Under ynh run, Claude Code's
+// own records carry ynh.session.id but not the harness name; the name is on ynh's ynh.session span
+// (ynw-17xrm). So a record is joined to that span by ynh.session.id, and the seat is the span's
+// ynh.harness.name. The span is read from the hours the window touches, like the records: a session
+// that began before the window, with its span in an earlier hour, leaves its records unnamed.
+const sessionSeats = `sessions AS (
+  SELECT pick(resource, attributes, 'ynh.session.id') AS sid,
+         min(pick(resource, attributes, 'ynh.harness.name')) AS session_seat
+  FROM spans
+  WHERE name = 'ynh.session' AND pick(resource, attributes, 'ynh.session.id') IS NOT NULL
+  GROUP BY sid
+)`
+
+// seatSQL is the seat of a record: a harness name the record itself carries, else the one its
+// session span names, else (unknown). It needs the sessions CTE joined as s.
+const seatSQL = "coalesce(harness, s.session_seat, '(unknown)')"
+
 // claudeUsage is the shared body of seats and accounts: Claude Code's token, cost and active-time
 // metrics as one row per day and dim, where dim is a SQL expression over the columns resource and
 // attributes. A delta point counts as it is. A cumulative series counts its growth since the
@@ -19,10 +36,11 @@ import (
 // day of a series inside the window counts its whole total.
 func claudeUsage(dimName, dim string) string {
 	return fmt.Sprintf(`
-WITH pts AS (
+WITH %[3]s, pts AS (
   SELECT CAST(time AS DATE) AS day, %[2]s AS dim, name, attr(attributes, 'type') AS kind,
          temporality, value, list_sort(resource) AS resource, list_sort(attributes) AS attributes, start_time
   FROM metric_points
+  LEFT JOIN sessions s ON s.sid = pick(resource, attributes, 'ynh.session.id')
   WHERE name IN ('claude_code.token.usage', 'claude_code.cost.usage', 'claude_code.active_time.total')
     AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane) AND labels_match(labels, $labels)
 ), series AS (
@@ -45,22 +63,22 @@ SELECT strftime(day, '%%Y-%%m-%%d') AS day, dim AS %[1]s,
        round(sum(n) FILTER (WHERE name = 'claude_code.active_time.total'), 1) AS active_s
 FROM inc
 GROUP BY day, dim
-ORDER BY day DESC, cost_usd DESC NULLS LAST, dim`, dimName, dim)
+ORDER BY day DESC, cost_usd DESC NULLS LAST, dim`, dimName, dim, sessionSeats)
 }
 
 var claudeSeats = Query{
 	Name:    "seats",
-	Help:    "Claude Code's tokens, cost and active time by day for each seat (the harness name ynh run sets)",
+	Help:    "Claude Code's tokens, cost and active time by day for each seat (named by the ynh.session span the records join by ynh.session.id)",
 	Since:   7 * 24 * time.Hour,
-	Signals: []string{store.Metrics},
-	SQL:     claudeUsage("seat", "coalesce(harness, '(unknown)')"),
+	Signals: []string{store.Metrics, store.Traces},
+	SQL:     claudeUsage("seat", seatSQL),
 }
 
 var claudeAccounts = Query{
 	Name:    "accounts",
 	Help:    "Claude Code's tokens, cost and active time by day for each hashed account",
 	Since:   7 * 24 * time.Hour,
-	Signals: []string{store.Metrics},
+	Signals: []string{store.Metrics, store.Traces},
 	SQL:     claudeUsage("account", "coalesce(pick(resource, attributes, 'user.account_uuid'), '(none)')"),
 }
 
@@ -68,9 +86,10 @@ var claudeSubagents = Query{
 	Name:    "subagents",
 	Help:    "Claude Code's requests, tokens, cost and request time by day for each seat's subagents",
 	Since:   7 * 24 * time.Hour,
-	Signals: []string{store.Logs},
+	Signals: []string{store.Logs, store.Traces},
 	SQL: `
-SELECT strftime(CAST(time AS DATE), '%Y-%m-%d') AS day, coalesce(harness, '(unknown)') AS seat,
+WITH ` + sessionSeats + `
+SELECT strftime(CAST(time AS DATE), '%Y-%m-%d') AS day, ` + seatSQL + ` AS seat,
        coalesce(attr(attributes, 'agent.name'), attr(attributes, 'agent_type'),
                 attr(attributes, 'subagent_type'), '(main)') AS agent,
        count(*) AS requests,
@@ -81,6 +100,7 @@ SELECT strftime(CAST(time AS DATE), '%Y-%m-%d') AS day, coalesce(harness, '(unkn
        round(sum(TRY_CAST(attr(attributes, 'cost_usd') AS DOUBLE)), 4) AS cost_usd,
        round(sum(TRY_CAST(attr(attributes, 'duration_ms') AS DOUBLE)) / 1000, 1) AS request_s
 FROM logs
+LEFT JOIN sessions s ON s.sid = pick(resource, attributes, 'ynh.session.id')
 WHERE event IN ('api_request', 'claude_code.api_request')
   AND time >= $since AND time < $until AND ($lane = '' OR lane = $lane) AND labels_match(labels, $labels)
 GROUP BY ALL
