@@ -76,7 +76,7 @@ ORDER BY day DESC, cost_usd DESC NULLS LAST, dim`, dimName, dim, sessionSeats)
 
 var claudeSeats = Query{
 	Name:    "seats",
-	Help:    "Claude Code's tokens, cost and active time by day for each seat (named by the ynh.session span the records join by ynh.session.id)",
+	Help:    "Claude Code's tokens, cost and active time by day for each seat (named by ynh's launch records, joined by ynh.session.id)",
 	Since:   7 * 24 * time.Hour,
 	Signals: []string{store.Metrics, store.Traces, store.Logs},
 	SQL:     claudeUsage("seat", seatSQL),
