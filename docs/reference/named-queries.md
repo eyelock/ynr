@@ -19,13 +19,16 @@ A **step** is identified by `ynf.step.id`, an **item** by `ynf.item.key`, and a 
 | [`item`](#item) | `<item key>` | 7 days | traces and logs | none |
 | [`trace`](#trace) | `<trace id>` | 7 days | traces | tree depth 64 |
 | [`cost`](#cost) | none | 7 days | traces | none |
+| [`seats`](#seats) | none | 7 days | metrics, with logs and traces to name the seat | none |
+| [`subagents`](#subagents) | none | 7 days | logs, with traces to name the seat | none |
+| [`accounts`](#accounts) | none | 7 days | metrics, with logs and traces | none |
 
 `--since` is a duration back from now (`24h`, `7d`) or an RFC 3339 time; `--until` is a time and
 defaults to now. `--since` must be before `--until`. A query that takes an argument needs it, and a
-query that does not take one refuses it. `--lane` narrows `runs`, `recent`, `items` and `cost` to one
+query that does not take one refuses it. `--lane` narrows `runs`, `recent`, `items`, `cost`, `seats`, `subagents` and `accounts` to one
 lane id; `item` and `trace` ignore it. `--label key:value`, repeatable, keeps only runs whose
 [labels](#promoted-columns) include every one given (so two labels combine with AND): it narrows `runs`,
-`recent`, `items`, `item` and `cost`, and `trace` ignores it. It travels to `ynr serve` and `ynr central`
+`recent`, `items`, `item`, `cost`, `seats`, `subagents` and `accounts`, and `trace` ignores it. It travels to `ynr serve` and `ynr central`
 like `--lane`. `runs` and `cost` over more than 7 days read rollups, which keep no labels, so a label
 with such a window is refused; narrow the window.
 
@@ -123,11 +126,71 @@ tokens.
 
 Ordered by cost, highest first.
 
+## Claude Code's own records
+
+`seats`, `subagents` and `accounts` read what Claude Code itself exports through `ynr relay` ([Run ynr
+with Claude Code](../how-to/run-with-claude-code.md)), not the `ynh.run` spans, so they cover an
+interactive seat that `ynh run` launched as well as `ynh agent run`. They always read records, never
+rollups, so `--label` is accepted over any window. A **seat** is named by
+ynh's own records of the launch, since Claude Code's records carry `ynh.session.id` but not the
+harness name: each record is joined, by `ynh.session.id`, to the `ynh.session` span or the
+`ynh.session.started` log event, and takes its `ynh.harness.name`. A harness name on the record
+itself wins. The span is exported when the session ends and the event at launch, so a running seat
+is named by its start event. Both are read from the same hours as the records, and a batch is filed
+by the hour it was received: a session is named when its start or its end falls in those hours (the
+window, an hour either side). A session that began before that and is still running is
+`(unknown)`, as is a record with no session id, and a harness run by path rather than installed id
+has no name to give. As with
+`cost`, ynr never prices tokens: cost is what Claude Code reported. The day is the UTC day of the record.
+
+### seats
+
+Claude Code's tokens, cost and active time by day for each seat, from its `claude_code.token.usage`,
+`claude_code.cost.usage` and `claude_code.active_time.total` metrics.
+
+| Column | Meaning |
+|---|---|
+| `day` | The UTC day, `YYYY-MM-DD`. |
+| `seat` | The harness name from the session's `ynh.session.started` event or `ynh.session` span, or `(unknown)`. |
+| `input_tokens`, `output_tokens` | Tokens of `type` `input` and `output`. |
+| `cache_read_tokens`, `cache_creation_tokens` | Tokens of `type` `cacheRead` and `cacheCreation`. |
+| `cost_usd` | The summed `claude_code.cost.usage`. |
+| `active_s` | The summed `claude_code.active_time.total`, in seconds (user and CLI time together). |
+
+Ordered by day, newest first, then cost, highest first. A delta metric counts as it is. A cumulative
+one counts its growth since the previous day it reported, so a session that spans days is not counted
+whole each day; a cumulative series that started before the window counts its whole total on the
+first day it reports inside it. A column is empty when Claude Code reported nothing of that kind.
+
+### subagents
+
+Requests, tokens, cost and request time by day, for each seat's main thread and each named subagent,
+from Claude Code's `api_request` events. This needs `OTEL_LOG_TOOL_DETAILS=1`, which `ynh run` sets:
+without it Claude Code does not name its subagents, and every request reads as `(main)`.
+
+| Column | Meaning |
+|---|---|
+| `day`, `seat` | As for `seats`. |
+| `agent` | The event's `agent.name`, else `agent_type`, else `subagent_type`, else `(main)` for the seat's own requests. |
+| `requests` | How many API requests. |
+| `input_tokens`, `output_tokens`, `cache_read_tokens`, `cache_creation_tokens` | The summed event attributes of the same names. |
+| `cost_usd` | The summed `cost_usd`. |
+| `request_s` | The summed `duration_ms` of the requests, in seconds: time spent waiting on the model, not active time. |
+
+Ordered by day, newest first, then cost, highest first.
+
+### accounts
+
+The columns of `seats`, with `account` in place of `seat`: the HMAC-hashed `user.account_uuid` the
+relay wrote ([ADR-006](../adr/006-sibling-instrumentation-contract.md) rule 10), or `(none)` when a
+record has none. The hash is the same for one account across records and cannot be reversed. A relay
+with no key, such as a per-launch one, drops the id, so its records read `(none)`.
+
 ## Long windows
 
 `runs` and `cost` answer a window longer than 7 days from the daily and monthly rollups instead of
 from records, in whole days. The `median_s` column is then empty, because a median cannot be rolled
-up. The other queries always read records.
+up. The other queries always read records, `seats`, `subagents` and `accounts` among them.
 
 Rollups are written for a day after it has closed, so the open day, and a closed day whose rollup is
 not written yet (ynr serve was down), have none. For those days the query reads the records received
