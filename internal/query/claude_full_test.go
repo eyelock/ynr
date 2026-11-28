@@ -210,6 +210,26 @@ func TestSeatsWithoutASessionSpanAreUnknown(t *testing.T) {
 	}
 }
 
+// A running seat has no ynh.session span yet, only the ynh.session.started event ynh flushed at
+// launch (ynw-csly6): that names it.
+func TestSeatsNamedByStartedEventWhileRunning(t *testing.T) {
+	r := openStore(t)
+	d := now.Add(-time.Hour)
+	delta := pmetric.AggregationTemporalityDelta
+	ship(t, r, store.Logs, d, "local.a",
+		eventLine(t, "ynh.session.started", d, map[string]any{"service.name": "ynh"},
+			map[string]any{"ynh.session.id": "sess-live", "ynh.harness.name": "reni"}),
+		eventLine(t, "api_request", d, map[string]any{"ynh.session.id": "sess-live"}, map[string]any{"cost_usd": 0.5}))
+	ship(t, r, store.Metrics, d.Add(time.Minute), "local.a",
+		usageLine(t, "claude_code.cost.usage", delta, 3, d, d, map[string]any{"ynh.session.id": "sess-live"}, nil))
+	for _, name := range []string{"seats", "subagents"} {
+		res := run(t, r, name, Params{})
+		if len(res.Rows) != 1 || fmt.Sprint(res.Rows[0][col(t, res, "seat")]) != "reni" {
+			t.Errorf("%s = %v, want one row for reni", name, rows(res))
+		}
+	}
+}
+
 func TestClaudeQueriesOnAnEmptyStore(t *testing.T) {
 	r := openStore(t)
 	for _, name := range []string{"seats", "accounts", "subagents"} {

@@ -13,15 +13,23 @@ import (
 // Claude Code puts on its api_request events. None has rollups: they read records, as recent does.
 
 // sessionSeats is the CTE that names a seat for Claude Code's records. Under ynh run, Claude Code's
-// own records carry ynh.session.id but not the harness name; the name is on ynh's ynh.session span
-// (ynw-17xrm). So a record is joined to that span by ynh.session.id, and the seat is the span's
-// ynh.harness.name. The span is read from the hours the window touches, like the records: a session
-// that began before the window, with its span in an earlier hour, leaves its records unnamed.
+// own records carry ynh.session.id but not the harness name; the name is on ynh's own records of
+// the launch (ynw-17xrm). Two of them carry it, with the same ynh.session.id: the ynh.session span,
+// which ynh exports only when the session ends, and the ynh.session.started log event, which ynh
+// flushes at launch. Reading both names a seat that is still running (ynw-csly6). Both are read
+// from the hours the window touches, as the records are, and a batch is filed by the hour it was
+// received: so a session is named when its start or its end falls in those hours. A session that
+// began before the window and is still running at its end has neither, and its records are unnamed.
 const sessionSeats = `sessions AS (
-  SELECT pick(resource, attributes, 'ynh.session.id') AS sid,
-         min(pick(resource, attributes, 'ynh.harness.name')) AS session_seat
-  FROM spans
-  WHERE name = 'ynh.session' AND pick(resource, attributes, 'ynh.session.id') IS NOT NULL
+  SELECT sid, min(seat_name) AS session_seat FROM (
+    SELECT pick(resource, attributes, 'ynh.session.id') AS sid,
+           pick(resource, attributes, 'ynh.harness.name') AS seat_name
+    FROM spans WHERE name = 'ynh.session'
+    UNION ALL
+    SELECT pick(resource, attributes, 'ynh.session.id') AS sid,
+           pick(resource, attributes, 'ynh.harness.name') AS seat_name
+    FROM logs WHERE event = 'ynh.session.started'
+  ) WHERE sid IS NOT NULL AND seat_name IS NOT NULL
   GROUP BY sid
 )`
 
@@ -70,7 +78,7 @@ var claudeSeats = Query{
 	Name:    "seats",
 	Help:    "Claude Code's tokens, cost and active time by day for each seat (named by the ynh.session span the records join by ynh.session.id)",
 	Since:   7 * 24 * time.Hour,
-	Signals: []string{store.Metrics, store.Traces},
+	Signals: []string{store.Metrics, store.Traces, store.Logs},
 	SQL:     claudeUsage("seat", seatSQL),
 }
 
@@ -78,7 +86,7 @@ var claudeAccounts = Query{
 	Name:    "accounts",
 	Help:    "Claude Code's tokens, cost and active time by day for each hashed account",
 	Since:   7 * 24 * time.Hour,
-	Signals: []string{store.Metrics, store.Traces},
+	Signals: []string{store.Metrics, store.Traces, store.Logs},
 	SQL:     claudeUsage("account", "coalesce(pick(resource, attributes, 'user.account_uuid'), '(none)')"),
 }
 

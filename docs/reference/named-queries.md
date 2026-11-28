@@ -19,9 +19,9 @@ A **step** is identified by `ynf.step.id`, an **item** by `ynf.item.key`, and a 
 | [`item`](#item) | `<item key>` | 7 days | traces and logs | none |
 | [`trace`](#trace) | `<trace id>` | 7 days | traces | tree depth 64 |
 | [`cost`](#cost) | none | 7 days | traces | none |
-| [`seats`](#seats) | none | 7 days | metrics | none |
-| [`subagents`](#subagents) | none | 7 days | logs | none |
-| [`accounts`](#accounts) | none | 7 days | metrics | none |
+| [`seats`](#seats) | none | 7 days | metrics, with logs and traces to name the seat | none |
+| [`subagents`](#subagents) | none | 7 days | logs, with traces to name the seat | none |
+| [`accounts`](#accounts) | none | 7 days | metrics, with logs and traces | none |
 
 `--since` is a duration back from now (`24h`, `7d`) or an RFC 3339 time; `--until` is a time and
 defaults to now. `--since` must be before `--until`. A query that takes an argument needs it, and a
@@ -131,8 +131,16 @@ Ordered by cost, highest first.
 `seats`, `subagents` and `accounts` read what Claude Code itself exports through `ynr relay` ([Run ynr
 with Claude Code](../how-to/run-with-claude-code.md)), not the `ynh.run` spans, so they cover an
 interactive seat that `ynh run` launched as well as `ynh agent run`. They always read records, never
-rollups, so `--label` is accepted over any window. A **seat** is the `harness` column: the
-`ynh.harness.name` resource attribute `ynh run` sets, or `(unknown)` when a record has none. As with
+rollups, so `--label` is accepted over any window. A **seat** is named by
+ynh's own records of the launch, since Claude Code's records carry `ynh.session.id` but not the
+harness name: each record is joined, by `ynh.session.id`, to the `ynh.session` span or the
+`ynh.session.started` log event, and takes its `ynh.harness.name`. A harness name on the record
+itself wins. The span is exported when the session ends and the event at launch, so a running seat
+is named by its start event. Both are read from the same hours as the records, and a batch is filed
+by the hour it was received: a session is named when its start or its end falls in those hours (the
+window, an hour either side). A session that began before that and is still running is
+`(unknown)`, as is a record with no session id, and a harness run by path rather than installed id
+has no name to give. As with
 `cost`, ynr never prices tokens: cost is what Claude Code reported. The day is the UTC day of the record.
 
 ### seats
@@ -143,7 +151,7 @@ Claude Code's tokens, cost and active time by day for each seat, from its `claud
 | Column | Meaning |
 |---|---|
 | `day` | The UTC day, `YYYY-MM-DD`. |
-| `seat` | The harness name from the session's `ynh.session` span, or `(unknown)`. |
+| `seat` | The harness name from the session's `ynh.session.started` event or `ynh.session` span, or `(unknown)`. |
 | `input_tokens`, `output_tokens` | Tokens of `type` `input` and `output`. |
 | `cache_read_tokens`, `cache_creation_tokens` | Tokens of `type` `cacheRead` and `cacheCreation`. |
 | `cost_usd` | The summed `claude_code.cost.usage`. |
